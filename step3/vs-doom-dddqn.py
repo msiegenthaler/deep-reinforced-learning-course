@@ -273,7 +273,6 @@ def calculate_loss(device, target_net, policy_net, memory, batch_size, gamma):
   actions = torch.stack([torch.tensor([e.action.index]) for e in exps])
   actions = actions.to(device)
   predicted_action_values = policy_net(states).gather(1, actions)
-
   loss = policy_net.loss(target_action_values, predicted_action_values)
   return loss
 
@@ -289,33 +288,39 @@ def learn_from_memory(device, target_net, policy_net, optimizer, memory, batch_s
   return loss
 
 # %%
-def train_step(device, target_net, policy_net, optimizer, game, memory, batch_size, gamma, exploration_rate):
-  state = game.current_state()
-  action = chose_action(device, policy_net, state, exploration_rate)
-  exp = game.step(game.actions[action])
-  state = exp.state_after
-  memory.remember(experience_to_tensor(exp))
+def train_step(device, target_net, policy_net, optimizer, game, memory, batch_size, game_steps_per_train_step, gamma, exploration_rate):
+  exps = []
+  for _ in range(game_steps_per_train_step):
+    state = game.current_state()
+    action = chose_action(device, policy_net, state, exploration_rate)
+    exp = game.step(game.actions[action])
+    state = exp.state_after
+    memory.remember(experience_to_tensor(exp))
+    exps.append(exp)
 
   loss = learn_from_memory(device, target_net, policy_net,
                            optimizer, memory, batch_size, gamma)
-  return loss, exp
+  return loss, exps
 
 
 # %%
-def train_epoch(device, target_net, policy_net, optimizer, game, memory, batch_size, gamma, exploration_rate, steps, copy_to_target_every):
+def train_epoch(device, target_net, policy_net, optimizer, game, memory, batch_size, game_steps_per_train_step, gamma, exploration_rate, steps, copy_to_target_every):
   episode_reward = 0
   episode_rewards = []
   total_loss = 0
   start_t = time()
   policy_net.train()
   for step in range(steps):
-    loss, exp = train_step(device, target_net, policy_net, optimizer, game,
-                           memory, batch_size, gamma, exploration_rate)
+    loss, exps = train_step(device, target_net, policy_net, optimizer, game,
+                           memory, batch_size, game_steps_per_train_step, gamma, exploration_rate)
     total_loss += loss
-    episode_reward += exp.reward
-    if exp.done:
-      episode_rewards.append(episode_reward)
-      episode_reward = 0
+
+    for exp in exps:
+      episode_reward += exp.reward
+      if exp.done:
+        episode_rewards.append(episode_reward)
+        episode_reward = 0
+
     if step % copy_to_target_every == 0:
       target_net.load_state_dict(policy_net.state_dict())
 
@@ -367,7 +372,12 @@ w = 86
 h = 86
 t = 4
 
-batch_size = 64
+use_dueling = True
+
+base_batch_size = 64          # number of game steps
+game_steps_per_train_step = 2 # number of game steps per learning batch -> optimize for fastests steps/s
+
+batch_size = base_batch_size * game_steps_per_train_step
 memory_size = 1000000
 
 gamma = 0.9  # Discounting
@@ -376,27 +386,24 @@ gamma = 0.9  # Discounting
 game = VizdoomBasicGame(w, h, t)
 game_name = 'vizdoom-basic'
 
-## %% DQN Network
-# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-# target_net = DQN(w, h, t, len(game.actions))
-# target_net.to(device)
-# policy_net = DQN(w, h, t, len(game.actions))
-# policy_net.to(device)
+# %% Deep Network
+global target_net, policy_net
+if use_dueling:
+  # DuelingDQN Network
+  target_net = DuelingDQN(w, h, t, len(game.actions))
+  policy_net = DuelingDQN(w, h, t, len(game.actions))
+  strategy_name = 'ddqn'
+else:
+  # DQN Network
+  target_net = DQN(w, h, t, len(game.actions))
+  policy_net = DQN(w, h, t, len(game.actions))
+  strategy_name = 'dqn'
 
-# optimizer = optim.RMSprop(policy_net.parameters())
-
-# total_epochs = 0
-# device
-
-# %% DuelingDQN Network
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-target_net = DuelingDQN(w, h, t, len(game.actions))
 target_net.to(device)
-policy_net = DuelingDQN(w, h, t, len(game.actions))
 policy_net.to(device)
 
 optimizer = optim.RMSprop(policy_net.parameters())
-strategy_name = 'ddqn'
 
 total_epochs = 0
 device
@@ -405,7 +412,7 @@ device
 memory = ReplayMemory(memory_size)
 pretrain(game, memory, batch_size)
 
-# %%
+# %% print validation
 def print_validation(episodes):
   val_rewards_avg, val_rewards, val_steps, val_actions = run_validation(
       device, policy_net, game, episodes)
@@ -413,57 +420,10 @@ def print_validation(episodes):
       total_epochs, val_rewards_avg, min(val_rewards), max(val_rewards),
       val_actions['left']/val_steps, val_actions['right']/val_steps, val_actions['fire']/val_steps))
 
-
-# %%
-train_epochs = 30
-learning_steps_per_epoch = 1000
-validation_episodes = 10
-
-copy_to_target_every = 100  # steps
-
-if total_epochs == 0:
-  max_exploration_rate = 0.8
-else:
-  max_exploration_rate = 0.5
-min_exploration_rate = 0.1
-
-save_every = 10
-
-
-print('Starting training for %d epochs' % train_epochs)
-for epoch in range(train_epochs):
-  exploration_rate = max_exploration_rate - \
-      (float(epoch)/train_epochs) * \
-      (max_exploration_rate - min_exploration_rate)
-  episodes, rewards, avg_loss, duration = train_epoch(device, target_net, policy_net, optimizer, game, memory,
-                                                      batch_size, gamma, exploration_rate, learning_steps_per_epoch,
-                                                      copy_to_target_every)
-  steps_per_second = learning_steps_per_epoch/duration
-  total_epochs += 1
-  if episodes != 0:
-    print('Epoch %d: %d eps.\texploration: %.2f \trewards: avg %.1f, min %.1f, max %.1f \tloss: %.0f \t %.1f step/s' %
-          (total_epochs, episodes, exploration_rate, sum(rewards)/(episodes), min(rewards), max(rewards), avg_loss, steps_per_second))
-  else:
-    print('Epoch %d: 0 eps.\texploration: %.2f\tloss: %.1f' %
-          (total_epochs, exploration_rate, avg_loss))
-
-  print_validation(validation_episodes)
-
-  if total_epochs % save_every == 0:
-    file = './state-%s-%s-%d.py' % (game-name, strategy_name, total_epochs)
-    torch.save(policy_net.state_dict(), file)
-    print('saved model to', file)
-
-print('Done training for %d epochs' % train_epochs)
-
-# %%
-print_validation(validation_episodes*3)
-
-#%% play_example
-import matplotlib.cm as cm
+# %% play_example
 import matplotlib.animation as animation
 
-def play_example(name='example_play'):
+def play_example(name='example', silent=False):
   policy_net.eval()
   game.reset()
   total_reward = 0
@@ -476,10 +436,11 @@ def play_example(name='example_play'):
     action = game.actions[action_index]
     actions[action.name] += 1
     exp = game.step(action)
-    print('%d  reward=%.0f  action=%s' % (step, exp.reward, action.name))
     s = experience_to_tensor(exp).state_after.unsqueeze(0).to(device)
     expected_reward = policy_net(s).cpu().detach().numpy()
-    print('    exp reward at state: %s' % (expected_reward))
+    if not silent:
+      print('%d  reward=%.0f  action=%s' % (step, exp.reward, action.name))
+      print('    exp reward at state: %s' % (expected_reward))
     total_reward += exp.reward
 
     images.append({
@@ -489,19 +450,70 @@ def play_example(name='example_play'):
       'action': action
     })
     if (exp.done):
-      print('Done')
+      if not silent: print('Done')
       break
-  print('done after %d steps. Total reward: %.0f' % (step, total_reward))
-  print(actions)
-
   fig = plt.figure()
   movie_frames = []
   for f in images:
-    plt.title(name)
+    plt.title('%s (%d -> %.0f)' % (name, len(images), total_reward))
     movie_frames.append([plt.imshow(f['image'], animated=True)])
   plt.show()
   ani = animation.ArtistAnimation(fig, movie_frames, interval=200, blit=True, repeat=False)
   movie_name = '%s-%s-%s.mp4' % (game_name, strategy_name, name)
   ani.save(movie_name)
-  print('Saved movie to %s' % movie_name)
+  if not silent:
+    print('done after %d steps. Total reward: %.0f' % (step, total_reward))
+    print(actions)
+    print('Saved movie to %s' % movie_name)
+
+# %%
+def train_it(train_epochs, game_steps_per_epoch=1000, save_every = 10, example_every = 5):
+  learning_steps_per_epoch = int(game_steps_per_epoch / game_steps_per_train_step)
+  validation_episodes = 10
+
+  copy_to_target_every = 100  # steps
+
+  global total_epochs
+  if total_epochs == 0:
+    max_exploration_rate = 0.8
+  else:
+    max_exploration_rate = 0.2
+  min_exploration_rate = 0.1
+
+  print('Starting training for %d epochs' % train_epochs)
+  for epoch in range(train_epochs):
+    exploration_rate = max_exploration_rate - \
+        (float(epoch)/train_epochs) * \
+        (max_exploration_rate - min_exploration_rate)
+    episodes, rewards, avg_loss, duration = train_epoch(device, target_net, policy_net, optimizer, game, memory,
+                                                        batch_size, game_steps_per_train_step, gamma, exploration_rate, learning_steps_per_epoch,
+                                                        copy_to_target_every)
+    steps_per_second = learning_steps_per_epoch/duration * game_steps_per_train_step
+    total_epochs += 1
+    if episodes != 0:
+      print('Epoch %d: %d eps.\texploration: %.2f \trewards: avg %.1f, min %.1f, max %.1f \tloss: %.2f \t %.1f step/s' %
+            (total_epochs, episodes, exploration_rate, sum(rewards)/(episodes), min(rewards), max(rewards), avg_loss, steps_per_second))
+    else:
+      print('Epoch %d: 0 eps.\texploration: %.2f\tloss: %.2f' %
+            (total_epochs, exploration_rate, avg_loss))
+
+    print_validation(validation_episodes)
+
+    if total_epochs % save_every == 0:
+      file = './state-%s-%s-%d.py' % (game_name, strategy_name, total_epochs)
+      torch.save(policy_net.state_dict(), file)
+      print('saved model to', file)
+
+    if total_epochs % example_every == 0:
+      play_example('epoch%d' % total_epochs, silent=True)
+
+  print('Done training for %d epochs' % train_epochs)
+
+# %%
+train_it(20)
+
+# %%
+print_validation(30)
+
+# %%
 play_example()
