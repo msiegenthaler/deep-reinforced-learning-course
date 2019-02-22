@@ -360,7 +360,7 @@ def print_validation(episodes):
 
 
 # %%
-train_epochs = 10
+train_epochs = 30
 learning_steps_per_epoch = 1000
 validation_episodes = 10
 
@@ -404,8 +404,11 @@ print('Done training for %d epochs' % train_epochs)
 # %%
 print_validation(validation_episodes*3)
 
-#%%
-def play_example():
+#%% play_example
+import matplotlib.cm as cm
+import matplotlib.animation as animation
+
+def play_example(name='example_play'):
   policy_net.eval()
   game.reset()
   total_reward = 0
@@ -424,21 +427,26 @@ def play_example():
     print('    exp reward at state: %s' % (expected_reward))
     total_reward += exp.reward
 
-    images.append(exp.state_after[0])
-
+    images.append({
+      'step': step,
+      'expected_reward': expected_reward,
+      'image': exp.state_after[0],
+      'action': action
+    })
     if (exp.done):
       print('Done')
       break
   print('done after %d steps. Total reward: %.0f' % (step, total_reward))
   print(actions)
 
-  for i in range(0, len(images), round(len(images)/10)):
-    img = images[i]
-    plt.imshow(img)
-    plt.title('After %d' % i)
-    plt.show()
-  image = images[len(images) - 1]
-  plt.imshow(img)
-  plt.title('Final')
+  fig = plt.figure()
+  movie_frames = []
+  for f in images:
+    plt.title(name)
+    movie_frames.append([plt.imshow(f['image'], animated=True)])
   plt.show()
+  ani = animation.ArtistAnimation(fig, movie_frames, interval=200, blit=True, repeat=False)
+  movie_name = '%s.mp4' % name
+  ani.save(movie_name)
+  print('Saved movie to %s' % movie_name)
 play_example()
