@@ -502,7 +502,7 @@ h = 86
 t = 4
 
 use_dueling = True
-use_prioritized_replay = False
+use_prioritized_replay = True
 
 base_batch_size = 64          # number of game steps
 game_steps_per_train_step = 2 # number of game steps per learning batch -> optimize for fastests steps/s
