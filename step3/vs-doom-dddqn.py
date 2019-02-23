@@ -1,6 +1,5 @@
 # %% Imports
 from time import time
-import torchvision.transforms as T
 import torch.nn.functional as F
 import torch.optim as optim
 import torch.nn as nn
@@ -8,10 +7,9 @@ import torch
 import random
 import numpy as np
 from skimage import transform
-from collections import deque
-from collections import namedtuple
 
 # %% Game
+from collections import namedtuple
 Action = namedtuple("Action", "name key index")
 Experience = namedtuple(
     "Experience", "state_before action state_after reward done")
@@ -97,9 +95,98 @@ class Frames:
     normalized = frame / 255.0
     return transform.resize(normalized, [self.x, self.y], mode='constant', anti_aliasing=False)
 
+# %% Sum Tree
+import numpy as np
+class SumTree:
+  def __init__(self, capacity):
+    self.capacity = capacity
+     # [--------------Parent nodes (n-1)----------][-------leaves to recode priority (n) -----]
+    self.tree = np.zeros(2 * capacity - 1)
+    self.data = np.zeros(capacity, dtype=object)
+    self.pointer = 0
+    self.leaf_offset = capacity - 1
+    self.at_max_capacity = False
+
+  def add(self, data, priority):
+    self.data[self.pointer] = data
+    self._update(self.pointer + self.leaf_offset, priority)
+    self.pointer += 1
+    if self.pointer >= self.capacity:
+      self.at_max_capacity = True
+      self.pointer = 0 # overwrite oldest if full
+
+  def total_priority(self):
+    return self.tree[0] # root node
+
+  def max_prio(self):
+    if self.size() == 0: return 0
+    else: return np.max(self._valid_leafs())
+
+  def min_prio(self):
+    if self.size() == 0: return 0
+    else: return np.min(self._valid_leafs())
+
+  def size(self):
+    if self.at_max_capacity: return self.capacity
+    else: return self.pointer
+
+  def get(self, prio_position):
+    """prio_position: value between 0 and total_priority"""
+    tree_index = self._get_leaf_position(prio_position)
+    data_index = tree_index - self.leaf_offset
+    if (data_index >= self.size()):
+      print('XXXX', tree_index, self.size(), data_index, self.pointer, self.capacity)
+      tree_index -= 1
+      data_index -= 1
+    update = lambda new_priority: self._update(tree_index, new_priority)
+    return self.tree[tree_index], self.data[data_index], update
+
+  def _valid_leafs(self):
+    if self.at_max_capacity: return self.tree[-self.capacity:]
+    else: return self.tree[self.leaf_offset:self.leaf_offset+self.pointer]
+
+  def _get_leaf_position(self, prio_position):
+    index_parent = 0 #start at root node
+    while index_parent < self.leaf_offset: # stop when we are at leaf level
+      index_left_child = 2 * index_parent + 1
+      index_right_child = index_left_child + 1
+
+      prio_left_child = self.tree[index_left_child]
+      if prio_position <= prio_left_child:
+        index_parent = index_left_child
+      else:
+        prio_position -= prio_left_child
+        index_parent = index_right_child
+    return index_parent
+
+  def _update(self, tree_index, priority):
+    delta = priority - self.tree[tree_index]
+    self.tree[tree_index] = priority
+    while tree_index != 0:
+      tree_index = (tree_index - 1) // 2 # parent node
+      self.tree[tree_index] += delta
+
 # %% Replay Memory
-class ReplayMemory:
+import abc
+from collections import namedtuple
+
+Sample = namedtuple("Sample", "experience weight update_weight")
+
+class ReplayMemory(abc.ABC):
+  @abc.abstractmethod
+  def remember(self, experience): pass
+
+  @abc.abstractmethod
+  def size(self): pass
+
+  @abc.abstractmethod
+  def sample(self, n): pass
+
+# %% Simple Replay Memory
+from collections import deque
+class SimpleReplayMemory(ReplayMemory):
   def __init__(self, size):
+    super(ReplayMemory)
     self.deque = deque(maxlen=size)
 
   def remember(self, experience):
@@ -109,7 +196,48 @@ class ReplayMemory:
     return len(self.deque)
 
   def sample(self, n):
-    return random.sample(self.deque, n)
+    noop = lambda error: ()
+    w = lambda beta: 1.0
+    return [Sample(e, w, noop) for e in random.sample(self.deque, n)]
+
+# %% Prioritized Replay Memory
+# see https://arxiv.org/abs/1511.05952
+class PrioritizedReplayMemory(ReplayMemory):
+  def __init__(self, capacity, epsilon=0.01, alpha=0.6, max_error=1.0):
+    """alpha = randomness: tradeoff between uniform (alpha=0) and weighted (alpha=1)"""
+    self.sum_tree = SumTree(capacity)
+    self.epsilon = epsilon
+    self.alpha = alpha
+    self.max_error = max_error
+
+  def remember(self, experience):
+    prio = self.sum_tree.max_prio()
+    if prio == 0: prio = self.max_error
+    self.sum_tree.add(experience, prio)
+
+  def size(self):
+    return self.sum_tree.size()
+
+  def sample(self, n):
+    total_prio = self.sum_tree.total_priority()
+    rvs = np.random.uniform(high=total_prio, size=n)
+    # for weight normalization (only scale weight downwards)
+    min_prob = self.sum_tree.min_prio() / total_prio
+
+    result = []
+    for rv in rvs:
+      prio, exp, update = self.sum_tree.get(rv)
+      sampling_prob = prio / total_prio
+      sample = Sample(
+        experience = exp,
+        weight = lambda beta, sampling_prob=sampling_prob, min_prob=min_prob:
+          # shortened version of:
+          # np.power(sampling_prob*size, -beta) / np.power(min_prob*size, -beta),
+          (min_prob/sampling_prob) ** beta,
+        update_weight = lambda td_error, update=update:
+          update(min(abs(td_error) + self.epsilon, self.max_error) ** self.alpha))
+      result.append(sample)
+    return result
 
 # %% DQN
 class DQN(nn.Module):
@@ -149,9 +277,6 @@ class DQN(nn.Module):
     r = self.linear(r)
     return r
 
-  def loss(self, predicted, actual):
-    return F.smooth_l1_loss(predicted, actual)
-
   def find_best_action(self, state):
     """returns index of best action"""
     with torch.no_grad():
@@ -187,7 +312,7 @@ class DuelingDQN(nn.Module):
     linear_in = conv_out_w * conv_out_h * 128
 
     self.action_count = action_count
-    
+
     self.state_value_linear = nn.Sequential(
       nn.Linear(linear_in, 512),
       nn.ReLU(),
@@ -207,9 +332,6 @@ class DuelingDQN(nn.Module):
     action_value = self.action_value_linear(r)
     value = state_value + action_value - torch.mean(action_value, dim=0)
     return value
-
-  def loss(self, predicted, actual):
-    return F.smooth_l1_loss(predicted, actual)
 
   def find_best_action(self, state):
     """returns index of best action"""
@@ -261,11 +383,7 @@ def get_target_action_values(device, target_net, gamma, exps):
   return target_action_values.unsqueeze(1)
 
 #%%
-def calculate_loss(device, target_net, policy_net, memory, batch_size, gamma):
-  if memory.size() < batch_size:
-    raise ValueError('memory contains less than batch_size (%d) samples' % batch_size)
-  exps = memory.sample(batch_size)
-
+def calculate_losses(device, target_net, policy_net, exps, gamma):
   target_action_values = get_target_action_values(device, target_net, gamma, exps).detach()
 
   states = torch.stack([e.state_before for e in exps])
@@ -273,22 +391,33 @@ def calculate_loss(device, target_net, policy_net, memory, batch_size, gamma):
   actions = torch.stack([torch.tensor([e.action.index]) for e in exps])
   actions = actions.to(device)
   predicted_action_values = policy_net(states).gather(1, actions)
-  loss = policy_net.loss(target_action_values, predicted_action_values)
-  return loss
+
+  losses = F.smooth_l1_loss(predicted_action_values, target_action_values, reduction='none')
+  return losses
 
 # %%
-def learn_from_memory(device, target_net, policy_net, optimizer, memory, batch_size, gamma):
-  loss = calculate_loss(device, target_net, policy_net,
-                        memory, batch_size, gamma)
+def learn_from_memory(device, target_net, policy_net, optimizer, memory, batch_size, gamma, beta):
+  if memory.size() < batch_size:
+    raise ValueError('memory contains less than batch_size (%d) samples' % batch_size)
+  sample = memory.sample(batch_size)
+  exps = [s.experience for s in sample]
+
+  weights = torch.tensor([s.weight(beta) for s in sample])
+  weights = weights.to(device)
+
+  losses = calculate_losses(device, target_net, policy_net, exps, gamma)
+  loss = torch.mean(losses * weights)
   optimizer.zero_grad()
   loss.backward()
-  for param in policy_net.parameters():
-    param.grad.data.clamp_(-1, 1)
   optimizer.step()
+
+  for index, s in enumerate(sample):
+   s.update_weight(losses[index])
+
   return loss
 
 # %%
-def train_step(device, target_net, policy_net, optimizer, game, memory, batch_size, game_steps_per_train_step, gamma, exploration_rate):
+def train_step(device, target_net, policy_net, optimizer, game, memory, batch_size, game_steps_per_train_step, gamma, beta, exploration_rate):
   exps = []
   for _ in range(game_steps_per_train_step):
     state = game.current_state()
@@ -299,12 +428,12 @@ def train_step(device, target_net, policy_net, optimizer, game, memory, batch_si
     exps.append(exp)
 
   loss = learn_from_memory(device, target_net, policy_net,
-                           optimizer, memory, batch_size, gamma)
+                           optimizer, memory, batch_size, gamma, beta)
   return loss, exps
 
 
 # %%
-def train_epoch(device, target_net, policy_net, optimizer, game, memory, batch_size, game_steps_per_train_step, gamma, exploration_rate, steps, copy_to_target_every):
+def train_epoch(device, target_net, policy_net, optimizer, game, memory, batch_size, game_steps_per_train_step, gamma, beta, exploration_rate, steps, copy_to_target_every):
   episode_reward = 0
   episode_rewards = []
   total_loss = 0
@@ -312,7 +441,7 @@ def train_epoch(device, target_net, policy_net, optimizer, game, memory, batch_s
   policy_net.train()
   for step in range(steps):
     loss, exps = train_step(device, target_net, policy_net, optimizer, game,
-                           memory, batch_size, game_steps_per_train_step, gamma, exploration_rate)
+                           memory, batch_size, game_steps_per_train_step, gamma, beta, exploration_rate)
     total_loss += loss
 
     for exp in exps:
@@ -373,12 +502,13 @@ h = 86
 t = 4
 
 use_dueling = True
+use_prioritized_replay = False
 
 base_batch_size = 64          # number of game steps
 game_steps_per_train_step = 2 # number of game steps per learning batch -> optimize for fastests steps/s
 
 batch_size = base_batch_size * game_steps_per_train_step
-memory_size = 1000000
+memory_size = 100000
 
 gamma = 0.9  # Discounting
 
@@ -387,7 +517,6 @@ game = VizdoomBasicGame(w, h, t)
 game_name = 'vizdoom-basic'
 
 # %% Deep Network
-global target_net, policy_net
 if use_dueling:
   # DuelingDQN Network
   target_net = DuelingDQN(w, h, t, len(game.actions))
@@ -408,9 +537,12 @@ optimizer = optim.RMSprop(policy_net.parameters())
 total_epochs = 0
 device
 
-# %%
-memory = ReplayMemory(memory_size)
-pretrain(game, memory, batch_size)
+# %% memory
+if use_prioritized_replay:
+  memory = PrioritizedReplayMemory(memory_size)
+else:
+  memory = SimpleReplayMemory(memory_size)
+pretrain(game, memory, batch_size*2)
 
 # %% print validation
 def print_validation(episodes):
@@ -421,6 +553,7 @@ def print_validation(episodes):
       val_actions['left']/val_steps, val_actions['right']/val_steps, val_actions['fire']/val_steps))
 
 # %% play_example
+import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 def play_example(name='example', silent=False):
@@ -467,37 +600,37 @@ def play_example(name='example', silent=False):
     print('Saved movie to %s' % movie_name)
 
 # %%
-def train_it(train_epochs, game_steps_per_epoch=1000, save_every = 10, example_every = 5):
-  learning_steps_per_epoch = int(game_steps_per_epoch / game_steps_per_train_step)
-  validation_episodes = 10
+from math import ceil
+def train_it(train_epochs, game_steps_per_epoch=1000, save_every=10, example_every=5, validation_episodes=5, beta_increment=0.03, max_exploration_rate=0.8):
+  learning_steps_per_epoch = ceil(game_steps_per_epoch / game_steps_per_train_step)
 
   copy_to_target_every = 100  # steps
 
   global total_epochs
-  if total_epochs == 0:
-    max_exploration_rate = 0.8
-  else:
-    max_exploration_rate = 0.2
+  max_exploration_rate = 0.8
   min_exploration_rate = 0.1
 
-  print('Starting training for %d epochs' % train_epochs)
+  beta = min(1, total_epochs * beta_increment)
+
+  print('Starting training for %d epochs a %d steps (with batch_size %d)' % (train_epochs, game_steps_per_epoch, batch_size))
   for epoch in range(train_epochs):
     exploration_rate = max_exploration_rate - \
         (float(epoch)/train_epochs) * \
         (max_exploration_rate - min_exploration_rate)
+    beta = min(1, beta+beta_increment)
     episodes, rewards, avg_loss, duration = train_epoch(device, target_net, policy_net, optimizer, game, memory,
-                                                        batch_size, game_steps_per_train_step, gamma, exploration_rate, learning_steps_per_epoch,
+                                                        batch_size, game_steps_per_train_step, gamma, beta, exploration_rate, learning_steps_per_epoch,
                                                         copy_to_target_every)
     steps_per_second = learning_steps_per_epoch/duration * game_steps_per_train_step
     total_epochs += 1
     if episodes != 0:
-      print('Epoch %d: %d eps.\texploration: %.2f \trewards: avg %.1f, min %.1f, max %.1f \tloss: %.2f \t %.1f step/s' %
-            (total_epochs, episodes, exploration_rate, sum(rewards)/(episodes), min(rewards), max(rewards), avg_loss, steps_per_second))
+      print('Epoch %d: %d eps.\texpl: %.2f  beta %.2f\trewards: avg %.1f, min %.1f, max %.1f \tloss: %.2f \t %.1f step/s' %
+            (total_epochs, episodes, exploration_rate, beta, sum(rewards)/(episodes), min(rewards), max(rewards), avg_loss, steps_per_second))
     else:
-      print('Epoch %d: 0 eps.\texploration: %.2f\tloss: %.2f' %
-            (total_epochs, exploration_rate, avg_loss))
+      print('Epoch %d: 0 eps.\texpl: %.2f  beta %.2f\tloss: %.2f' %
+            (total_epochs, exploration_rate, beta, avg_loss))
 
-    print_validation(validation_episodes)
+    if validation_episodes > 0: print_validation(validation_episodes)
 
     if total_epochs % save_every == 0:
       file = './state-%s-%s-%d.py' % (game_name, strategy_name, total_epochs)
@@ -510,7 +643,7 @@ def train_it(train_epochs, game_steps_per_epoch=1000, save_every = 10, example_e
   print('Done training for %d epochs' % train_epochs)
 
 # %%
-train_it(20)
+train_it(30)
 
 # %%
 print_validation(30)
