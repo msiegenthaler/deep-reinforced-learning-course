@@ -14,7 +14,7 @@ Action = namedtuple("Action", "name key index")
 Experience = namedtuple(
     "Experience", "state_before action state_after reward done")
 
-from vizdoom import *
+from vizdoom import DoomGame
 class VizdoomBasicGame:
   def __init__(self, x, y, t):
     left = Action("left", [1, 0, 0], 0)
@@ -97,6 +97,8 @@ class Frames:
 
 # %% Sum Tree
 import numpy as np
+import math
+
 class SumTree:
   def __init__(self, capacity):
     self.capacity = capacity
@@ -160,6 +162,7 @@ class SumTree:
     return index_parent
 
   def _update(self, tree_index, priority):
+    if math.isnan(priority) or math.isinf(priority): priority = 1.0
     delta = priority - self.tree[tree_index]
     self.tree[tree_index] = priority
     while tree_index != 0:
@@ -429,6 +432,7 @@ def train_step(device, target_net, policy_net, optimizer, game, memory, batch_si
 
   loss = learn_from_memory(device, target_net, policy_net,
                            optimizer, memory, batch_size, gamma, beta)
+  if math.isnan(loss.item()) or math.isinf(loss.item()): raise ValueError('infinite loss')
   return loss, exps
 
 
@@ -517,25 +521,28 @@ game = VizdoomBasicGame(w, h, t)
 game_name = 'vizdoom-basic'
 
 # %% Deep Network
-if use_dueling:
-  # DuelingDQN Network
-  target_net = DuelingDQN(w, h, t, len(game.actions))
-  policy_net = DuelingDQN(w, h, t, len(game.actions))
-  strategy_name = 'ddqn'
-else:
-  # DQN Network
-  target_net = DQN(w, h, t, len(game.actions))
-  policy_net = DQN(w, h, t, len(game.actions))
-  strategy_name = 'dqn'
-
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-target_net.to(device)
-policy_net.to(device)
 
+def init_network():
+  if use_dueling:
+    # DuelingDQN Network
+    target_net = DuelingDQN(w, h, t, len(game.actions))
+    policy_net = DuelingDQN(w, h, t, len(game.actions))
+    strategy_name = 'ddqn'
+  else:
+    # DQN Network
+    target_net = DQN(w, h, t, len(game.actions))
+    policy_net = DQN(w, h, t, len(game.actions))
+    strategy_name = 'dqn'
+  target_net.to(device)
+  policy_net.to(device)
+  global total_epochs
+  total_epochs = 0
+  return target_net, policy_net
+
+target_net, policy_net = init_network()
 optimizer = optim.RMSprop(policy_net.parameters())
-
-total_epochs = 0
-device
+print('Using device %s' % device)
 
 # %% memory
 if use_prioritized_replay:
@@ -600,6 +607,19 @@ def play_example(name='example', silent=False):
     print('Saved movie to %s' % movie_name)
 
 # %%
+def warm_up(rounds=10):
+  print('warming up for %d rounds' % rounds)
+  opt = optim.RMSprop(policy_net.parameters(), lr=1e-5)
+  for r in range(rounds):
+    # print(list(policy_net.parameters())[0][0][0])
+    loss = learn_from_memory(device, target_net, policy_net, opt, memory, 8, gamma, 1.0).item()
+    # print(loss)
+    # print(list(policy_net.parameters())[0][0][0])
+    if math.isnan(loss) or math.isinf(loss):
+      raise ValueError('infinite loss after round %d' % r)
+  print('warm up done')
+
+# %%
 from math import ceil
 def train_it(train_epochs, game_steps_per_epoch=1000, save_every=10, example_every=5, validation_episodes=5, beta_increment=0.03, max_exploration_rate=0.8):
   learning_steps_per_epoch = ceil(game_steps_per_epoch / game_steps_per_train_step)
@@ -643,7 +663,11 @@ def train_it(train_epochs, game_steps_per_epoch=1000, save_every=10, example_eve
   print('Done training for %d epochs' % train_epochs)
 
 # %%
-train_it(30)
+target_net, policy_net = init_network()
+warm_up(500)
+
+# %%
+train_it(10)
 
 # %%
 print_validation(30)
