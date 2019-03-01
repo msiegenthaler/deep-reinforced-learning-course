@@ -1,0 +1,9 @@
+[MASTER]
+extension-pkg-whitelist=vizdoom,torch
+
+[TYPECHECK]
+ignored-modules=vizdoom,torch
+ignored-classes=vizdoom,torch
+
+[FORMAT]
+indent-string=  
