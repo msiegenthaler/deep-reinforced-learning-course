@@ -28,8 +28,8 @@ class VizdoomBasicGame:
 
   def _setupGame(self):
     game = DoomGame()
-    game.load_config("step3/simpler_basic.cfg")
-    game.set_doom_scenario_path("step3/simpler_basic.wad")
+    game.load_config("vizdoom/simpler_basic.cfg")
+    game.set_doom_scenario_path("vizdoom/simpler_basic.wad")
     game.set_window_visible(False)
     game.init()
     return game
@@ -682,7 +682,7 @@ def play_example(name='example', silent=False):
     movie_frames.append([plt.imshow(f['image'], animated=True)])
   plt.show()
   ani = animation.ArtistAnimation(fig, movie_frames, interval=200, blit=True, repeat=False)
-  movie_name = '%s-%s-%s.mp4' % (game_name, strategy_name, name)
+  movie_name = 'videos/%s-%s-%s.mp4' % (game_name, strategy_name, name)
   ani.save(movie_name)
   if not silent:
     print('done after %d steps. Total reward: %.0f' % (step, total_reward))
@@ -735,7 +735,7 @@ def train(train_epochs, game_steps_per_epoch=1000, save_every=10, example_every=
     if validation_episodes > 0: print_validation(validation_episodes)
 
     if save_every!=0 and total_epochs % save_every == 0:
-      file = './state-%s-%s-%d.py' % (game_name, strategy_name, total_epochs)
+      file = 'model/state-%s-%s-%d.py' % (game_name, strategy_name, total_epochs)
       torch.save(policy_net.state_dict(), file)
       print('saved model to', file)
 
