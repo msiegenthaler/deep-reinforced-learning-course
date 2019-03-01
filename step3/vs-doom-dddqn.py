@@ -1,5 +1,4 @@
 # %% Imports
-from time import time
 import torch.nn.functional as F
 import torch.optim as optim
 import torch.nn as nn
@@ -111,7 +110,7 @@ class SumTree:
 
   def add(self, data, priority):
     self.data[self.pointer] = data
-    self._update(self.pointer + self.leaf_offset, priority)
+    self.update(self.pointer + self.leaf_offset, priority)
     self.pointer += 1
     if self.pointer >= self.capacity:
       self.at_max_capacity = True
@@ -135,8 +134,7 @@ class SumTree:
   def get(self, prio_position):
     """prio_position: value between 0 and total_priority"""
     tree_index, data_index = self._get_leaf_position(prio_position)
-    update = lambda new_priority: self._update(tree_index, new_priority)
-    return self.tree[tree_index], self.data[data_index], update
+    return self.tree[tree_index], self.data[data_index], tree_index
 
   def _valid_leafs(self):
     if self.at_max_capacity: return self.tree[-self.capacity:]
@@ -161,7 +159,7 @@ class SumTree:
       tree_index = data_index + self.leaf_offset
     return tree_index, data_index
 
-  def _update(self, tree_index, priority):
+  def update(self, tree_index, priority):
     if math.isnan(priority) or math.isinf(priority): priority = 1.0
     delta = priority - self.tree[tree_index]
     self.tree[tree_index] = priority
@@ -173,7 +171,7 @@ class SumTree:
 import abc
 from collections import namedtuple
 
-Sample = namedtuple("Sample", "experience weight update_weight")
+Sample = namedtuple("Sample", "experience weight more")
 
 class ReplayMemory(abc.ABC):
   @abc.abstractmethod
@@ -184,6 +182,9 @@ class ReplayMemory(abc.ABC):
 
   @abc.abstractmethod
   def sample(self, n): pass
+
+  @abc.abstractmethod
+  def update_weights(self, samples, td_errors): pass
 
 # %% Simple Replay Memory
 from collections import deque
@@ -202,6 +203,9 @@ class SimpleReplayMemory(ReplayMemory):
     noop = lambda error: ()
     w = lambda beta: 1.0
     return [Sample(e, w, noop) for e in random.sample(self.deque, n)]
+
+  def update_weights(self, samples, td_errors): pass
+
 
 # %% Prioritized Replay Memory
 # see https://arxiv.org/abs/1511.05952
@@ -229,7 +233,7 @@ class PrioritizedReplayMemory(ReplayMemory):
 
     result = []
     for rv in rvs:
-      prio, exp, update = self.sum_tree.get(rv)
+      prio, exp, tree_index = self.sum_tree.get(rv)
       sampling_prob = prio / total_prio
       sample = Sample(
         experience = exp,
@@ -237,10 +241,16 @@ class PrioritizedReplayMemory(ReplayMemory):
           # shortened version of:
           # np.power(sampling_prob*size, -beta) / np.power(min_prob*size, -beta),
           (min_prob/sampling_prob) ** beta,
-        update_weight = lambda td_error, update=update:
-          update(min(abs(td_error) + self.epsilon, self.max_error) ** self.alpha))
+        more = tree_index)
       result.append(sample)
     return result
+
+  def update_weights(self, samples, td_errors):
+    clipped = torch.clamp(torch.abs(td_errors) + self.epsilon, max=self.max_error)
+    prios = torch.pow(clipped, self.alpha)
+    ps = prios.cpu().detach().numpy()
+    for i, s in enumerate(samples):
+      self.sum_tree.update(s.more, ps[i])
 
 # %% DQN
 class DQN(nn.Module):
@@ -354,6 +364,65 @@ def experience_to_tensor(exp):
       done=exp.done
   )
 
+#%% Timings
+from time import time
+class Timer:
+  def __init__(self, name):
+    self.name = name
+    self.total_duration = 0.
+    self.n = 0
+
+  @property
+  def avg_duration(self):
+    if self.n == 0: return 0
+    return self.total_duration / self.n
+
+  def __enter__(self):
+    self.t0 = time()
+
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    self.total_duration += (time() - self.t0) * 1000
+    self.n += 1
+  
+  def __str__(self):
+    return '%s: %.0fms (%0.3fms per call)' % (self.name, self.total_duration, self.avg_duration)
+  def format(self, length):
+    return ('%-'+str(length)+'s: %10.0fms (%10.1fms per call, %10d calls)') % (self.name, self.total_duration, self.avg_duration, self.n)
+
+class Timings:
+  def __init__(self):
+    self.reset()
+  def _add(self, name):
+    t = Timer(name)
+    self.timers.append(t)
+    return t
+
+  def reset(self):
+    self.timers = []
+    # Elementar (don't sum)
+    self.sample   = self._add("Sample")
+    self.remember  = self._add("Remember")
+    self.memory_weights = self._add("Memory Weights")
+    self.backprop = self._add("Backprop")
+    self.forward  = self._add("Forward")
+    self.game     = self._add("Game")
+    # Components
+    self.learn    = self._add("Learn")
+    self.play     = self._add("Play")
+    # Totals
+    self.step     = self._add("Step")
+    self.epoch    = self._add("Epoch")
+
+  def __str__(self):
+    length = max(map(lambda t: len(t.name), self.timers))
+    s = []
+    for t in self.timers: s.append(t.format(length))
+    return "\n".join(s)
+  def __repr__(self):
+    return str(self)
+
+timings = Timings()
+
 # %%
 def pretrain(game, memory, n):
   game.reset()
@@ -402,63 +471,76 @@ def calculate_losses(device, target_net, policy_net, exps, gamma):
 def learn_from_memory(device, target_net, policy_net, optimizer, memory, batch_size, gamma, beta):
   if memory.size() < batch_size:
     raise ValueError('memory contains less than batch_size (%d) samples' % batch_size)
-  sample = memory.sample(batch_size)
-  exps = [s.experience for s in sample]
 
-  weights = torch.tensor([s.weight(beta) for s in sample])
-  weights = weights.to(device)
+  with timings.sample:
+    sample = memory.sample(batch_size)
+    exps = [s.experience for s in sample]
+    weights = torch.tensor([s.weight(beta) for s in sample])
+    weights = weights.to(device)
 
-  losses = calculate_losses(device, target_net, policy_net, exps, gamma)
-  loss = torch.mean(losses * weights)
-  optimizer.zero_grad()
-  loss.backward()
-  optimizer.step()
+  with timings.forward:
+    losses = calculate_losses(device, target_net, policy_net, exps, gamma)
+    loss = torch.mean(losses * weights)
 
-  for index, s in enumerate(sample):
-   s.update_weight(losses[index])
+  with timings.backprop:
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    torch.cuda.synchronize()
+
+  with timings.memory_weights:
+    memory.update_weights(sample, losses.detach())
 
   return loss
 
 # %%
 def train_step(device, target_net, policy_net, optimizer, game, memory, batch_size, game_steps_per_train_step, gamma, beta, exploration_rate):
-  exps = []
-  for _ in range(game_steps_per_train_step):
-    state = game.current_state()
-    action = chose_action(device, policy_net, state, exploration_rate)
-    exp = game.step(game.actions[action])
-    state = exp.state_after
-    memory.remember(experience_to_tensor(exp))
-    exps.append(exp)
+  with timings.step:
+    exps = []
+    with timings.play:
+      state = game.current_state()
+      for _ in range(game_steps_per_train_step):
+        with timings.forward:
+          action = chose_action(device, policy_net, state, exploration_rate)
+        with timings.game:
+          exp = game.step(game.actions[action])
+        state = exp.state_after
+        with timings.remember:
+          memory.remember(experience_to_tensor(exp))
+        exps.append(exp)
 
-  loss = learn_from_memory(device, target_net, policy_net,
-                           optimizer, memory, batch_size, gamma, beta)
-  if math.isnan(loss.item()) or math.isinf(loss.item()): raise ValueError('infinite loss')
-  return loss, exps
+    with timings.learn:
+      loss = learn_from_memory(device, target_net, policy_net,
+                              optimizer, memory, batch_size, gamma, beta)
+    if math.isnan(loss.item()) or math.isinf(loss.item()): raise ValueError('infinite loss')
+
+    return loss, exps
 
 
 # %%
 def train_epoch(device, target_net, policy_net, optimizer, game, memory, batch_size, game_steps_per_train_step, gamma, beta, exploration_rate, steps, copy_to_target_every):
-  episode_reward = 0
-  episode_rewards = []
-  total_loss = 0
-  start_t = time()
-  policy_net.train()
-  for step in range(steps):
-    loss, exps = train_step(device, target_net, policy_net, optimizer, game,
-                           memory, batch_size, game_steps_per_train_step, gamma, beta, exploration_rate)
-    total_loss += loss
+  with timings.epoch:
+    episode_reward = 0
+    episode_rewards = []
+    total_loss = 0
+    start_t = time()
+    policy_net.train()
+    for step in range(steps):
+      loss, exps = train_step(device, target_net, policy_net, optimizer, game,
+                            memory, batch_size, game_steps_per_train_step, gamma, beta, exploration_rate)
+      total_loss += loss
 
-    for exp in exps:
-      episode_reward += exp.reward
-      if exp.done:
-        episode_rewards.append(episode_reward)
-        episode_reward = 0
+      for exp in exps:
+        episode_reward += exp.reward
+        if exp.done:
+          episode_rewards.append(episode_reward)
+          episode_reward = 0
 
-    if step % copy_to_target_every == 0:
-      target_net.load_state_dict(policy_net.state_dict())
+      if step % copy_to_target_every == 0:
+        target_net.load_state_dict(policy_net.state_dict())
 
-  target_net.load_state_dict(policy_net.state_dict())
-  return len(episode_rewards), episode_rewards, float(total_loss)/steps, time()-start_t
+    target_net.load_state_dict(policy_net.state_dict())
+    return len(episode_rewards), episode_rewards, float(total_loss)/steps, time()-start_t
 
 # %%
 def run_episode(device, dqn, game):
@@ -524,6 +606,7 @@ game_name = 'vizdoom-basic'
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def init_network():
+  global strategy_name
   if use_dueling:
     # DuelingDQN Network
     target_net = DuelingDQN(w, h, t, len(game.actions))
@@ -619,9 +702,9 @@ def warm_up(rounds=10):
       raise ValueError('infinite loss after round %d' % r)
   print('warm up done')
 
-# %%
+# %% Train
 from math import ceil
-def train_it(train_epochs, game_steps_per_epoch=1000, save_every=10, example_every=5, validation_episodes=5, beta_increment=0.03, max_exploration_rate=0.8):
+def train(train_epochs, game_steps_per_epoch=1000, save_every=10, example_every=5, validation_episodes=5, beta_increment=0.03, max_exploration_rate=0.8):
   learning_steps_per_epoch = ceil(game_steps_per_epoch / game_steps_per_train_step)
 
   copy_to_target_every = 100  # steps
@@ -644,30 +727,34 @@ def train_it(train_epochs, game_steps_per_epoch=1000, save_every=10, example_eve
     steps_per_second = learning_steps_per_epoch/duration * game_steps_per_train_step
     total_epochs += 1
     if episodes != 0:
-      print('Epoch %d: %d eps.\texpl: %.2f  beta %.2f\trewards: avg %.1f, min %.1f, max %.1f \tloss: %.2f \t %.1f step/s' %
-            (total_epochs, episodes, exploration_rate, beta, sum(rewards)/(episodes), min(rewards), max(rewards), avg_loss, steps_per_second))
+      print('Epoch %d: %d eps.\texpl: %.2f  beta %.2f\trewards: avg %.1f, min %.1f, max %.1f \tloss: %.2f \t %.1f step/s (%.1fs total)' %
+            (total_epochs, episodes, exploration_rate, beta, sum(rewards)/(episodes), min(rewards), max(rewards), avg_loss, steps_per_second, duration))
     else:
       print('Epoch %d: 0 eps.\texpl: %.2f  beta %.2f\tloss: %.2f' %
             (total_epochs, exploration_rate, beta, avg_loss))
 
     if validation_episodes > 0: print_validation(validation_episodes)
 
-    if total_epochs % save_every == 0:
+    if save_every!=0 and total_epochs % save_every == 0:
       file = './state-%s-%s-%d.py' % (game_name, strategy_name, total_epochs)
       torch.save(policy_net.state_dict(), file)
       print('saved model to', file)
 
-    if total_epochs % example_every == 0:
+    if example_every!=0 and total_epochs % example_every == 0:
       play_example('epoch%d' % total_epochs, silent=True)
 
   print('Done training for %d epochs' % train_epochs)
+
+def train_single(steps=game_steps_per_train_step):
+  train(train_epochs=1, game_steps_per_epoch=steps, save_every=0, example_every=0, validation_episodes=0)
+
 
 # %%
 target_net, policy_net = init_network()
 warm_up(500)
 
 # %%
-train_it(10)
+train(10)
 
 # %%
 print_validation(30)
