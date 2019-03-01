@@ -710,7 +710,6 @@ def train(train_epochs, game_steps_per_epoch=1000, save_every=10, example_every=
   copy_to_target_every = 100  # steps
 
   global total_epochs
-  max_exploration_rate = 0.8
   min_exploration_rate = 0.1
 
   beta = min(1, total_epochs * beta_increment)
