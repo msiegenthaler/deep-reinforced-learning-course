@@ -134,12 +134,7 @@ class SumTree:
 
   def get(self, prio_position):
     """prio_position: value between 0 and total_priority"""
-    tree_index = self._get_leaf_position(prio_position)
-    data_index = tree_index - self.leaf_offset
-    if (data_index >= self.size()):
-      print('XXXX', tree_index, self.size(), data_index, self.pointer, self.capacity)
-      tree_index -= 1
-      data_index -= 1
+    tree_index, data_index = self._get_leaf_position(prio_position)
     update = lambda new_priority: self._update(tree_index, new_priority)
     return self.tree[tree_index], self.data[data_index], update
 
@@ -148,18 +143,23 @@ class SumTree:
     else: return self.tree[self.leaf_offset:self.leaf_offset+self.pointer]
 
   def _get_leaf_position(self, prio_position):
-    index_parent = 0 #start at root node
-    while index_parent < self.leaf_offset: # stop when we are at leaf level
-      index_left_child = 2 * index_parent + 1
+    tree_index = 0 #start at root node
+    while tree_index < self.leaf_offset: # stop when we are at leaf level
+      index_left_child = 2 * tree_index + 1
       index_right_child = index_left_child + 1
 
       prio_left_child = self.tree[index_left_child]
       if prio_position <= prio_left_child:
-        index_parent = index_left_child
+        tree_index = index_left_child
       else:
         prio_position -= prio_left_child
-        index_parent = index_right_child
-    return index_parent
+        tree_index = index_right_child
+    data_index = tree_index - self.leaf_offset
+    if (data_index >= self.size()):
+      # basically the prio position was too large, just return the last element
+      data_index = self.size() - 1
+      tree_index = data_index + self.leaf_offset
+    return tree_index, data_index
 
   def _update(self, tree_index, priority):
     if math.isnan(priority) or math.isinf(priority): priority = 1.0
