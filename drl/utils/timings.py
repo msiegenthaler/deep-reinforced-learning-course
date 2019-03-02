@@ -9,7 +9,8 @@ class Timer:
 
   @property
   def avg_duration(self):
-    if self.n == 0: return 0
+    if self.n == 0:
+      return 0
     return self.total_duration / self.n
 
   def __enter__(self):
@@ -24,12 +25,12 @@ class Timer:
 
   def format(self, length):
     return ('%-' + str(length) + 's: %10.0fms (%10.1fms per call, %10d calls)') % (
-    self.name, self.total_duration, self.avg_duration, self.n)
+      self.name, self.total_duration, self.avg_duration, self.n)
 
 
 class Timings:
   def __init__(self):
-    self.reset()
+    self.timers = {}
 
   def reset(self):
     self.timers = {}
@@ -43,12 +44,14 @@ class Timings:
       return timer
 
   def __str__(self):
-    length = max(map(lambda t: len(t.name), self.timers))
+    length = max(map(lambda name: len(name), self.timers))
     s = []
-    for t in self.timers: s.append(t.format(length))
+    for t, _ in self.timers.items():
+      s.append(t.format(length))
     return "\n".join(s)
 
   def __repr__(self):
     return str(self)
+
 
 timings = Timings()
