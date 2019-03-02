@@ -54,7 +54,11 @@ def warm_up(model: LearningModel, rounds: int = 100) -> None:
   for r in range(rounds):
     loss = learn_from_memory(model, 8, 0.9, 1.0)
     if math.isnan(loss) or math.isinf(loss):
-      raise ValueError('infinite loss after round %d' % r)
+      raise ValueError('infinite loss after part 1 round %d' % r)
+  for r in range(rounds):
+    loss = learn_from_memory(model, 16, 0.9, 1.0)
+    if math.isnan(loss) or math.isinf(loss):
+      raise ValueError('infinite loss after part 2 round %d' % r)
 
 
 def pretrain(model: LearningModel, hyperparams: TrainingHyperparameters) -> None:

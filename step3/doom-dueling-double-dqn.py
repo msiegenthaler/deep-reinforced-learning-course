@@ -4,7 +4,7 @@ from torch.optim import RMSprop
 
 from drl.deepq.execution import play_example
 from drl.deepq.learn import LearningModel
-from drl.deepq.networks import DQN
+from drl.deepq.networks import DuelingDQN
 from drl.deepq.replay_memory import PrioritizedReplayMemory
 from drl.deepq.train import TrainingHyperparameters, pretrain, train
 from step3.game_vizdoom import VizdoomBasicGame
@@ -35,15 +35,15 @@ print('Using device %s' % device)
 game = VizdoomBasicGame(w, h, t)
 memory = PrioritizedReplayMemory(memory_size)
 # memory = SimpleReplayMemory(memory_size)
-policy_net = DQN(w, h, t, len(game.actions)).to(device)
+policy_net = DuelingDQN(w, h, t, len(game.actions)).to(device)
 
 model = LearningModel(
   game=game,
   memory=memory,
   policy_net=policy_net,
-  target_net=DQN(w, h, t, len(game.actions)).to(device),
+  target_net=DuelingDQN(w, h, t, len(game.actions)).to(device),
   optimizer=RMSprop(policy_net.parameters()),
-  strategy_name='dualdqn',
+  strategy_name='duelingdoubledqn',
   device=device
 )
 print('Model prepared')
@@ -56,4 +56,4 @@ print('Pretraining finished')
 #train(model, hyperparams, 10)
 
 #%%
-play_example(model)
+#play_example(model)
