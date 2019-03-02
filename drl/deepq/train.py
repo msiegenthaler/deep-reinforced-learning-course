@@ -19,13 +19,14 @@ class TrainingHyperparameters(NamedTuple):
   # rate of random action (vs 'best' actions) [0,1]
   min_exploration_rate = 0.1
   max_exploration_rate = 0.8
+  exploration_rate_decrement = 0.1 # per epoch
 
   # discounting factor for future (next-step) rewards (e.g. 0.99)
   gamma: float = 0.9
 
   # weighting of priorized experiences [0=no correction, 1=uniform]
   initial_beta: float = 0.
-  beta_increment: float = 0.03
+  beta_increment: float = 0.03 # per epoch
 
   # number of game steps (actions) to perform per batch
   game_steps_per_step: int = 1
@@ -145,19 +146,14 @@ def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epoc
   """
   learning_steps_per_epoch = math.ceil(hyperparams.game_steps_per_epoch / hyperparams.game_steps_per_step)
 
-  min_exploration_rate = 0.1
-
-  beta = min(1., hyperparams.initial_beta + model.status.trained_for_epochs * hyperparams.beta_increment)
-
   print('Starting training for %d epochs a %d steps (with batch_size %d)' % (train_epochs,
                                                                              hyperparams.game_steps_per_epoch,
                                                                              hyperparams.batch_size))
 
   for epoch in range(train_epochs):
-    exploration_rate = hyperparams.max_exploration_rate - \
-                       (float(epoch) / train_epochs) * \
-                       (hyperparams.max_exploration_rate - min_exploration_rate)
-    beta = min(1., beta + hyperparams.beta_increment)
+    exploration_rate = max(hyperparams.min_exploration_rate, hyperparams.max_exploration_rate - \
+                       model.status.trained_for_epochs * hyperparams.exploration_rate_decrement)
+    beta = min(1.0, hyperparams.initial_beta + model.status.trained_for_epochs * hyperparams.beta_increment)
 
     t0 = time()
     episodes, rewards, avg_loss = train_epoch(model, hyperparams, beta, exploration_rate, learning_steps_per_epoch)
