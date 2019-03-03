@@ -46,7 +46,7 @@ class Timings:
   def __str__(self):
     length = max(map(lambda name: len(name), self.timers))
     s = []
-    for t, _ in self.timers.items():
+    for _, t in self.timers.items():
       s.append(t.format(length))
     return "\n".join(s)
 
