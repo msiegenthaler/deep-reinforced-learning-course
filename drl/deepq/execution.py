@@ -123,4 +123,5 @@ def play_example(model: ExecutionModel, name='example', silent: bool = False) ->
     print('done after %d steps. Total reward: %.0f' % (step, total_reward))
     print('- ', actions)
     print('- Saved movie to %s' % movie_name)
+  plt.close()
   return movie_name
