@@ -17,9 +17,9 @@ class TrainingHyperparameters(NamedTuple):
   batch_size: int
 
   # rate of random action (vs 'best' actions) [0,1]
-  min_exploration_rate = 0.1
-  max_exploration_rate = 0.8
-  exploration_rate_decrement = 0.1 # per epoch
+  min_exploration_rate: float = 0.1
+  max_exploration_rate: float = 0.8
+  exploration_rate_decrement: float = 0.1 # per epoch
 
   # discounting factor for future (next-step) rewards (e.g. 0.99)
   gamma: float = 0.9
