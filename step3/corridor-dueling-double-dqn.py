@@ -9,9 +9,6 @@ from drl.deepq.replay_memory import PrioritizedReplayMemory
 from drl.deepq.train import TrainingHyperparameters, pretrain, train
 from step3.game_vizdoom import VizdoomCorridorGame
 
-use_dueling = True
-use_prioritized_replay = True
-
 game_steps_per_step = 2
 batch_per_game_step = 64
 batch_size = game_steps_per_step * batch_per_game_step
