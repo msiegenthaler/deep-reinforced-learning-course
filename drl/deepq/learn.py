@@ -79,7 +79,8 @@ def learn_from_memory(model: LearningModel, batch_size: int, gamma: float, beta:
     model.optimizer.zero_grad()
     loss.backward()
     model.optimizer.step()
-    torch.cuda.synchronize()  # for the timings
+    if torch.cuda.is_available():
+      torch.cuda.synchronize()  # for the timings
 
   with timings['update memory weights']:
     model.memory.update_weights(sample, losses.detach())
