@@ -6,9 +6,9 @@ from drl.deepq.execution import play_example
 from drl.deepq.learn import LearningModel
 from drl.deepq.networks import DQN
 from drl.deepq.replay_memory import PrioritizedReplayMemory, SimpleReplayMemory
-from drl.deepq.train import TrainingHyperparameters, pretrain, train
+from drl.deepq.train import TrainingHyperparameters, pretrain, train, resume_if_possible, linear_increase, linear_decay, \
+  play_and_remember_steps
 from step3.game_openai import CartPoleVisual
-from step3.game_vizdoom import VizdoomBasicGame
 
 game_steps_per_step = 2
 batch_per_game_step = 64
@@ -16,15 +16,16 @@ batch_size = game_steps_per_step * batch_per_game_step
 
 w = h = 86
 t = 4
-memory_size = 10000
+memory_size = 100000
 
 hyperparams = TrainingHyperparameters(
   gamma=0.9,
-  beta_increment=0.02,
+  beta=linear_increase(0.05),
+  exploration_rate=linear_decay(0.05, max_value=0.8, min_value=0.2),
   batch_size=batch_size,
   game_steps_per_step=game_steps_per_step,
-  copy_to_target_every=30,
-  game_steps_per_epoch=100
+  copy_to_target_every=300,
+  game_steps_per_epoch=1000
 )
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -47,11 +48,15 @@ model = LearningModel(
 print('Model prepared')
 
 # %%
-pretrain(model, hyperparams)
-print('Pretraining finished')
+if resume_if_possible(model):
+  play_and_remember_steps(model, hyperparams)
+  print('Resuming completed')
+else:
+  pretrain(model, hyperparams)
+  print('Pretraining finished')
 
 # %%
 #train(model, hyperparams, 10)
 
-#%%
-# play_example(model)
+# %%
+#play_example(model)

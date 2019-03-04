@@ -125,3 +125,9 @@ def play_example(model: ExecutionModel, name='example', silent: bool = False) ->
     print('- Saved movie to %s' % movie_name)
   plt.close()
   return movie_name
+
+
+def load(model: nn.Module, file: str) -> nn.Module:
+  model.load_state_dict(torch.load(file))
+  model.eval()
+  return model

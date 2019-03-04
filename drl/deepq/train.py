@@ -1,10 +1,11 @@
 import math
+import os
 import random
 from time import time
-from typing import NamedTuple
+from typing import NamedTuple, Callable
 
 import torch
-from torch import Tensor, optim
+from torch import Tensor
 
 from drl.deepq.execution import best_action, run_validation, ExecutionModel, play_example
 from drl.deepq.game import Experience
@@ -12,21 +13,26 @@ from drl.deepq.learn import learn_from_memory, LearningModel
 from drl.utils.timings import timings
 
 
+def linear_decay(delta: float, min_value: float = 0., max_value: float = 1.):
+  return lambda epoch: max(min_value, max_value - epoch * delta)
+
+
+def linear_increase(delta: float, min_value: float = 0., max_value: float = 1.):
+  return lambda epoch: min(max_value, min_value + epoch * delta)
+
+
 class TrainingHyperparameters(NamedTuple):
   # number of items to process in one optimization step (backprop)
   batch_size: int
 
-  # rate of random action (vs 'best' actions) [0,1]
-  min_exploration_rate: float = 0.1
-  max_exploration_rate: float = 0.8
-  exploration_rate_decrement: float = 0.1 # per epoch
+  # rate of random action (vs 'best' actions) [0,1]: epoch -> rate
+  exploration_rate: Callable[[int], float] = linear_decay(0.05, min_value=0.1, max_value=0.8)
+
+  # weighting of priorized experiences [0=no correction, 1=uniform]: epoch -> beta
+  beta: Callable[[int], float] = linear_increase(0.05)
 
   # discounting factor for future (next-step) rewards (e.g. 0.99)
   gamma: float = 0.9
-
-  # weighting of priorized experiences [0=no correction, 1=uniform]
-  initial_beta: float = 0.
-  beta_increment: float = 0.03 # per epoch
 
   # number of game steps (actions) to perform per batch
   game_steps_per_step: int = 1
@@ -51,7 +57,6 @@ def warm_up(model: LearningModel, rounds: int = 100) -> None:
   """
   Warm up the training model to prevent NaN losses and such bad things
   """
-  opt = optim.RMSprop(model.policy_net.parameters(), lr=1e-5)
   for r in range(rounds):
     loss = learn_from_memory(model, 8, 0.9, 1.0)
     if math.isnan(loss) or math.isinf(loss):
@@ -171,15 +176,57 @@ def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epoc
       print_validation(model, validation_episodes)
 
     if save_every != 0 and model.status.trained_for_epochs % save_every == 0:
-      file = 'model/state-%s-%s-%04d.py' % (model.game.name, model.strategy_name, model.status.trained_for_epochs)
-      torch.save(model.policy_net.state_dict(), file)
-      print(' - saved model to', file)
+      save_checkpoint(model)
 
     if example_every != 0 and model.status.trained_for_epochs % example_every == 0:
       video = play_example(model_to_exec(model), 'epoch%04d' % model.status.trained_for_epochs, silent=True)
       print(' - saved example gameplay video to', video)
 
   print('Done training for %d epochs' % train_epochs)
+
+
+def save_checkpoint(model: LearningModel):
+  data = {
+    'epoch': model.status.trained_for_epochs,
+    'steps': model.status.trained_for_steps,
+    'optimizer_state_dict': model.optimizer.state_dict(),
+    'model_state_dict': model.policy_net.state_dict()
+  }
+  file = 'checkpoints/%s-%s-%04d.pt' % (model.game.name, model.strategy_name, model.status.trained_for_epochs)
+  torch.save(data, file)
+  last_file = 'checkpoints/%s-%s-last.pt' % (model.game.name, model.strategy_name)
+  torch.save(data, last_file)
+  print(' - saved checkpoint to', file)
+
+
+def resume_if_possible(model: LearningModel, suffix: str = 'last') -> bool:
+  file = 'checkpoints/%s-%s-%s.pt' % (model.game.name, model.strategy_name, suffix)
+  if os.path.isfile(file):
+    data = torch.load(file)
+    model.status.trained_for_epochs = data['epoch']
+    model.status.trained_for_steps = data['steps']
+    model.optimizer.load_state_dict(data['optimizer_state_dict'])
+    model.policy_net.load_state_dict(data['model_state_dict'])
+    model.target_net.load_state_dict(data['model_state_dict'])
+    print('loaded checkpoint from', file)
+    return True
+  else:
+    return False
+
+
+def play_and_remember_steps(model: LearningModel, hyperparameters: TrainingHyperparameters, batches: int = 10) -> None:
+  exploration_rate = hyperparameters.exploration_rate(model.status.trained_for_epochs)
+  steps = hyperparameters.batch_size * batches
+  with timings['play']:
+    state = model.game.current_state()
+    for _ in range(steps):
+      with timings['forward action']:
+        action = chose_action(model, state, exploration_rate)
+      with timings['game']:
+        exp = model.game.step(model.game.actions[action])
+      state = exp.state_after
+      with timings['remember']:
+        model.memory.remember(exp)
 
 
 def model_to_exec(model: LearningModel) -> ExecutionModel:
