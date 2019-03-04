@@ -247,5 +247,5 @@ def print_validation(model: LearningModel, episodes: int):
   for name, cnt in val_actions.items():
     actions.append('%s: %.2f' % (name, cnt / val_steps))
 
-  print(' - validation @%3d: %.0f (min: %4.0f, max %4.0f)\t%s' % (
-    model.status.trained_for_epochs, val_rewards_avg, min(val_rewards), max(val_rewards), ", ".join(actions)))
+  print(' - validation %4.0f    (min: %4.0f, max %4.0f)\t%s' % (
+    val_rewards_avg, min(val_rewards), max(val_rewards), ", ".join(actions)))
