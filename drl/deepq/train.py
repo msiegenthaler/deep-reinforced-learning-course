@@ -208,7 +208,7 @@ def resume_if_possible(model: LearningModel, suffix: str = 'last') -> bool:
   if os.path.isfile(file):
     data = torch.load(file)
     model.status.trained_for_epochs = data['epoch']
-    model.status.trained_for_episodes = data['episodes']
+    model.status.trained_for_episodes = data['episodes'] if 'episodes' in data else 0
     model.status.trained_for_steps = data['steps']
     model.optimizer.load_state_dict(data['optimizer_state_dict'])
     model.policy_net.load_state_dict(data['model_state_dict'])
