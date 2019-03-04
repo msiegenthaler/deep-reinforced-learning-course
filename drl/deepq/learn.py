@@ -13,6 +13,7 @@ class TrainingStatus:
   def __init__(self):
     self.trained_for_epochs = 0
     self.trained_for_steps = 0
+    self.trained_for_episodes = 0
 
 class LearningModel(NamedTuple):
   target_net: nn.Module

@@ -126,6 +126,7 @@ def train_epoch(model: LearningModel, hyperparameters: TrainingHyperparameters, 
       for exp in exps:
         episode_reward += exp.reward
         if exp.done:
+          model.status.trained_for_episodes += 1
           episode_rewards.append(episode_reward)
           episode_reward = 0
 
@@ -165,14 +166,14 @@ def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epoc
     if episodes != 0:
       print(
         ('Epoch %3d: %2d eps.\texpl: %4.2f beta %4.2f\trewards: %4.0f (%4.0f to %4.0f)' +
-         '\tloss: %4.2f\t%4.1f step/s (%d steps)') %
+         '\tloss: %4.2f\t%4.1f step/s (%d steps, %d episodes)') %
         (model.status.trained_for_epochs, episodes, exploration_rate, beta,
          sum(rewards) / episodes, min(rewards), max(rewards), avg_loss, steps_per_second,
-         model.status.trained_for_steps))
+         model.status.trained_for_steps, model.status.trained_for_episodes))
     else:
-      print('Epoch %3d:  0 eps.\texpl: %.2f  beta %.2f\tloss: %.2f\t%4.1f step/s (%d steps)' %
+      print('Epoch %3d:  0 eps.\texpl: %.2f  beta %.2f\tloss: %.2f\t%4.1f step/s (%d steps, %d episodes)' %
             (model.status.trained_for_epochs, exploration_rate, beta, avg_loss, steps_per_second,
-             model.status.trained_for_steps))
+             model.status.trained_for_steps, model.status.trained_for_episodes))
 
     if validation_episodes > 0:
       print_validation(model, validation_episodes)
@@ -190,6 +191,7 @@ def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epoc
 def save_checkpoint(model: LearningModel):
   data = {
     'epoch': model.status.trained_for_epochs,
+    'episodes': model.status.trained_for_episodes,
     'steps': model.status.trained_for_steps,
     'optimizer_state_dict': model.optimizer.state_dict(),
     'model_state_dict': model.policy_net.state_dict()
@@ -206,6 +208,7 @@ def resume_if_possible(model: LearningModel, suffix: str = 'last') -> bool:
   if os.path.isfile(file):
     data = torch.load(file)
     model.status.trained_for_epochs = data['epoch']
+    model.status.trained_for_episodes = data['episodes']
     model.status.trained_for_steps = data['steps']
     model.optimizer.load_state_dict(data['optimizer_state_dict'])
     model.policy_net.load_state_dict(data['model_state_dict'])
