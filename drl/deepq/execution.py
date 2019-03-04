@@ -76,7 +76,7 @@ def run_validation(model: ExecutionModel, count: int) -> object:
   return sum(rewards) / count, rewards, steps, actions
 
 
-def play_example(model: ExecutionModel, name='example', silent: bool = False) -> str:
+def play_example(model: ExecutionModel, name='example', silent: bool = False) -> (str, int, float):
   """
   Plays an episode of the game and saves a video of it.
   :returns the name of the video file
@@ -95,6 +95,7 @@ def play_example(model: ExecutionModel, name='example', silent: bool = False) ->
     actions[action.name] += 1
 
     exp = model.game.step(action)
+    state = exp.state_after
     if not silent:
       print('- %4d  reward=%3.0f  action=%s' % (step, exp.reward, action.name))
     total_reward += exp.reward
@@ -104,7 +105,7 @@ def play_example(model: ExecutionModel, name='example', silent: bool = False) ->
       'image': exp.state_after[0],
       'action': action
     })
-    if (exp.done):
+    if exp.done:
       if not silent:
         print('Done')
       break
@@ -124,7 +125,7 @@ def play_example(model: ExecutionModel, name='example', silent: bool = False) ->
     print('- ', actions)
     print('- Saved movie to %s' % movie_name)
   plt.close()
-  return movie_name
+  return movie_name, step, total_reward
 
 
 def load(model: nn.Module, file: str) -> nn.Module:

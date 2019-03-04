@@ -180,8 +180,8 @@ def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epoc
       save_checkpoint(model)
 
     if example_every != 0 and model.status.trained_for_epochs % example_every == 0:
-      video = play_example(model_to_exec(model), 'epoch%04d' % model.status.trained_for_epochs, silent=True)
-      print(' - saved example gameplay video to', video)
+      video, v_s, v_r = play_example(model_to_exec(model), 'epoch%04d' % model.status.trained_for_epochs, silent=True)
+      print(' - saved example gameplay video to %s (reward: %.0f, steps: %d)' % (video, v_r, v_s))
 
   print('Done training for %d epochs' % train_epochs)
 
