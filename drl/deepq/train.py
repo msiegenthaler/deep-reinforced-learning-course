@@ -138,7 +138,7 @@ def train_epoch(model: LearningModel, hyperparameters: TrainingHyperparameters, 
 
 
 def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epochs,
-          save_every=10, example_every=5, validation_episodes=3) -> None:
+          save_every=10, example_every=10, validation_episodes=10) -> None:
   """
   Train the model to get better at the game
   :param model:
@@ -170,8 +170,9 @@ def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epoc
          sum(rewards) / episodes, min(rewards), max(rewards), avg_loss, steps_per_second,
          model.status.trained_for_steps))
     else:
-      print('Epoch %3d:  0 eps.\texpl: %.2f  beta %.2f\tloss: %.2f' %
-            (model.status.trained_for_epochs, exploration_rate, beta, avg_loss))
+      print('Epoch %3d:  0 eps.\texpl: %.2f  beta %.2f\tloss: %.2f\t%4.1f step/s (%d steps)' %
+            (model.status.trained_for_epochs, exploration_rate, beta, avg_loss, steps_per_second,
+             model.status.trained_for_steps))
 
     if validation_episodes > 0:
       print_validation(model, validation_episodes)
