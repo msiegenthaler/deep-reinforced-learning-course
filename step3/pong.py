@@ -4,7 +4,7 @@ from torch.optim import RMSprop
 
 from drl.deepq.execution import play_example
 from drl.deepq.learn import LearningModel
-from drl.deepq.networks import DQN
+from drl.deepq.networks import DQN, DuelingDQN
 from drl.deepq.replay_memory import PrioritizedReplayMemory, SimpleReplayMemory
 from drl.deepq.train import TrainingHyperparameters, pretrain, train, resume_if_possible, linear_increase, linear_decay, \
   play_and_remember_steps
@@ -21,7 +21,7 @@ memory_size = 100000
 hyperparams = TrainingHyperparameters(
   gamma=0.9,
   beta=linear_increase(0.05),
-  exploration_rate=linear_decay(0.05, max_value=0.8, min_value=0.2),
+  exploration_rate=linear_decay(0.02, max_value=0.8, min_value=0.1),
   batch_size=batch_size,
   game_steps_per_step=game_steps_per_step,
   copy_to_target_every=100,
@@ -32,17 +32,16 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print('Using device %s' % device)
 
 game = Pong(w, h, t)
-# memory = PrioritizedReplayMemory(memory_size)
-memory = SimpleReplayMemory(memory_size)
-policy_net = DQN(w, h, t, len(game.actions)).to(device)
+memory = PrioritizedReplayMemory(memory_size)
+policy_net = DuelingDQN(w, h, t, len(game.actions)).to(device)
 
 model = LearningModel(
   game=game,
   memory=memory,
   policy_net=policy_net,
-  target_net=DQN(w, h, t, len(game.actions)).to(device),
+  target_net=DuelingDQN(w, h, t, len(game.actions)).to(device),
   optimizer=RMSprop(policy_net.parameters()),
-  strategy_name='doubledqn',
+  strategy_name='pdddq',
   device=device
 )
 print('Model prepared')
