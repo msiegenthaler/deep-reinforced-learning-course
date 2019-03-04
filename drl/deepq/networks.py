@@ -2,6 +2,10 @@ import torch
 import torch.nn as nn
 
 
+def conv2d_size_out(size, kernel_size=4, stride=2):
+  return (size - (kernel_size - 1) - 1) // stride + 1
+
+
 class DQN(nn.Module):
   def __init__(self, w: int, h: int, t: int, action_count: int):
     """
@@ -11,9 +15,6 @@ class DQN(nn.Module):
     :param action_count: number of actions/action combinations in the game
     """
     super(DQN, self).__init__()
-
-    def conv2d_size_out(size, kernel_size=4, stride=2):
-      return (size - (kernel_size - 1) - 1) // stride + 1
 
     self.conv = nn.Sequential(
       nn.Conv2d(t, 32, kernel_size=8, stride=2),
@@ -56,9 +57,6 @@ class DuelingDQN(nn.Module):
     """
     super(DuelingDQN, self).__init__()
 
-    def conv2d_size_out(size, kernel_size=4, stride=2):
-      return (size - (kernel_size - 1) - 1) // stride + 1
-
     self.conv = nn.Sequential(
       nn.Conv2d(t, 32, kernel_size=8, stride=2),
       nn.BatchNorm2d(32),
@@ -95,5 +93,5 @@ class DuelingDQN(nn.Module):
     r = r.view(r.size(0), -1)
     state_value = self.state_value_linear(r)
     action_value = self.action_value_linear(r)
-    value = state_value + action_value - torch.mean(action_value, dim=0)
+    value = state_value + action_value - torch.mean(action_value)
     return value
