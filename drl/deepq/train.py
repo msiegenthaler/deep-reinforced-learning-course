@@ -156,18 +156,19 @@ def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epoc
                                                                              hyperparams.batch_size))
 
   for epoch in range(train_epochs):
-    exploration_rate = max(hyperparams.min_exploration_rate, hyperparams.max_exploration_rate - \
-                       model.status.trained_for_epochs * hyperparams.exploration_rate_decrement)
-    beta = min(1.0, hyperparams.initial_beta + model.status.trained_for_epochs * hyperparams.beta_increment)
+    exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
+    beta = hyperparams.beta(model.status.trained_for_epochs)
 
     t0 = time()
     episodes, rewards, avg_loss = train_epoch(model, hyperparams, beta, exploration_rate, learning_steps_per_epoch)
     steps_per_second = learning_steps_per_epoch / (time() - t0) * hyperparams.game_steps_per_step
     if episodes != 0:
       print(
-        'Epoch %3d: %2d eps.\texpl: %3.1f  beta %3.1f\trewards: avg %4.0f, min %4.0f, max %4.0f \tloss: %4.2f \t %4.1f step/s' %
+        ('Epoch %3d: %2d eps.\texpl: %4.2f beta %4.2f\trewards: %4.0f (%4.0f to %4.0f)' +
+         '\tloss: %4.2f\t%4.1f step/s (%d steps)') %
         (model.status.trained_for_epochs, episodes, exploration_rate, beta,
-         sum(rewards) / (episodes), min(rewards), max(rewards), avg_loss, steps_per_second))
+         sum(rewards) / episodes, min(rewards), max(rewards), avg_loss, steps_per_second,
+         model.status.trained_for_steps))
     else:
       print('Epoch %3d:  0 eps.\texpl: %.2f  beta %.2f\tloss: %.2f' %
             (model.status.trained_for_epochs, exploration_rate, beta, avg_loss))
