@@ -20,7 +20,7 @@ t = 4
 memory_size = 100000
 
 hyperparams = TrainingHyperparameters(
-  gamma=0.9,
+  gamma=1,
   beta=linear_increase(0.05),
   exploration_rate=linear_decay(0.05, max_value=0.8, min_value=0.2),
   batch_size=batch_size,
@@ -33,7 +33,6 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print('Using device %s' % device)
 
 game = CartPoleVisual(w, h, t)
-# memory = PrioritizedReplayMemory(memory_size)
 memory = SimpleReplayMemory(memory_size)
 policy_net = DQN(w, h, t, len(game.actions)).to(device)
 

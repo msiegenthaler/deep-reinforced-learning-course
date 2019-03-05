@@ -54,7 +54,7 @@ def calculate_losses(model: LearningModel, gamma: float, exps: [Experience]) -> 
   actions = actions.to(model.device)
   predicted_action_values = model.policy_net(states).gather(1, actions)
 
-  return F.smooth_l1_loss(predicted_action_values, target_action_values, reduction='none')
+  return F.mse_loss(predicted_action_values, target_action_values, reduction='none')
 
 
 def learn_from_memory(model: LearningModel, batch_size: int, gamma: float, beta: float) -> float:
