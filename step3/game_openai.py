@@ -2,9 +2,8 @@ import abc
 from abc import ABC
 
 import gym
-import numpy as np
-from torch import Tensor
 import torchvision.transforms as T
+from torch import Tensor
 
 from drl.deepq.game import Game, Action, State, Experience, Frames
 
@@ -79,13 +78,14 @@ class Pong(OpenAIGame):
              Action('down', 3, 1)]
 
   def __init__(self, x: int, y: int, t: int):
-    super().__init__('Pong-v0', x, y, t)
-    self.x = x
-    self.y = y
+    self.transform = T.Compose([T.ToPILImage(), T.Resize((y, x)), T.Grayscale(), T.ToTensor()])
+    super().__init__('Pong-v0', t)
 
   @property
   def name(self) -> str:
     return 'pong'
 
   def _get_frame(self, env_state):
-    return np.dot(env_state[..., :3], [0.299, 0.587, 0.114]) * 255
+    raw = env_state[..., :3]
+    image = self.transform(raw)
+    return image.squeeze(0)
