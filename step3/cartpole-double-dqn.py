@@ -14,7 +14,8 @@ game_steps_per_step = 2
 batch_per_game_step = 64
 batch_size = game_steps_per_step * batch_per_game_step
 
-w = h = 86
+w = 128
+h = 64
 t = 4
 memory_size = 100000
 
