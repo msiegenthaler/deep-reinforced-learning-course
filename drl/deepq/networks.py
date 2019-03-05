@@ -93,5 +93,5 @@ class DuelingDQN(nn.Module):
     r = r.view(r.size(0), -1)
     state_value = self.state_value_linear(r)
     action_value = self.action_value_linear(r)
-    value = state_value + action_value - torch.mean(action_value)
+    value = state_value + action_value - torch.mean(action_value, 1, keepdim=True)
     return value
