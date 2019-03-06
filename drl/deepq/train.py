@@ -67,9 +67,9 @@ def warm_up(model: LearningModel, rounds: int = 100) -> None:
       raise ValueError('infinite loss after part 2 round %d' % r)
 
 
-def pretrain(model: LearningModel, hyperparams: TrainingHyperparameters) -> None:
+def pretrain(model: LearningModel, hyperparams: TrainingHyperparameters, warm_up_iterations = 500) -> None:
   prefill_memory(model, hyperparams.batch_size)
-  warm_up(model, 500)
+  warm_up(model, warm_up_iterations)
 
 
 def chose_action(model: LearningModel, state: Tensor, exploration_rate: float) -> int:
