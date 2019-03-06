@@ -2,13 +2,12 @@
 import torch
 from torch.optim import RMSprop
 
-from drl.deepq.execution import play_example
 from drl.deepq.learn import LearningModel
 from drl.deepq.networks import DuelingDQN
-from drl.deepq.replay_memory import PrioritizedReplayMemory, SimpleReplayMemory
-from drl.deepq.train import TrainingHyperparameters, pretrain, train, resume_if_possible, linear_increase, linear_decay, \
+from drl.deepq.replay_memory import PrioritizedReplayMemory
+from drl.deepq.train import TrainingHyperparameters, pretrain, resume_if_possible, linear_increase, linear_decay, \
   play_and_remember_steps
-from step3.game_openai import CartPoleVisual
+from drl.openai.cartpole import CartPoleVisual
 
 game_steps_per_step = 2
 batch_per_game_step = 128

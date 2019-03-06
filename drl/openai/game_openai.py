@@ -2,7 +2,6 @@ import abc
 from abc import ABC
 
 import gym
-import torchvision.transforms as T
 from torch import Tensor
 
 from drl.deepq.game import Game, Action, State, Experience, Frames
@@ -54,38 +53,3 @@ class OpenAIFrameGame(OpenAIGame, ABC):
 
   def _get_raw_frame(self):
     return self.env.render(mode='rgb_array')
-
-
-class CartPoleVisual(OpenAIFrameGame):
-  actions = [Action('left', 0, 0),
-             Action('right', 1, 1)]
-
-  def __init__(self, x: int, y: int, t: int):
-    self.transform = T.Compose([T.ToPILImage(), T.Resize((y, x)), T.Grayscale(), T.ToTensor()])
-    super().__init__('CartPole-v0', t)
-
-  @property
-  def name(self) -> str:
-    return 'cardpole'
-
-  def _get_frame(self, env_state) -> Tensor:
-    image = self.transform(self._get_raw_frame()[330:660, 0:1200, :])
-    return image.squeeze(0)
-
-
-class Pong(OpenAIGame):
-  actions = [Action('up', 2, 0),
-             Action('down', 3, 1)]
-
-  def __init__(self, x: int, y: int, t: int):
-    self.transform = T.Compose([T.ToPILImage(), T.Resize((y, x)), T.Grayscale(), T.ToTensor()])
-    super().__init__('Pong-v0', t)
-
-  @property
-  def name(self) -> str:
-    return 'pong'
-
-  def _get_frame(self, env_state):
-    raw = env_state[..., :3]
-    image = self.transform(raw)
-    return image.squeeze(0)
