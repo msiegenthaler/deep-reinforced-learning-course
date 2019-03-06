@@ -10,22 +10,22 @@ from drl.deepq.train import TrainingHyperparameters, pretrain, resume_if_possibl
   play_and_remember_steps
 from drl.openai.pong import Pong
 
-game_steps_per_step = 2
-batch_per_game_step = 128
+game_steps_per_step = 4
+batch_per_game_step = 64
 batch_size = game_steps_per_step * batch_per_game_step
 
 w = h = 86
 t = 4
-memory_size = 100000
+memory_size = 1000000
 
 hyperparams = TrainingHyperparameters(
-  gamma=0.9,
+  gamma=0.99,
   beta=linear_increase(0.05),
-  exploration_rate=linear_decay(0.02, max_value=0.8, min_value=0.1),
+  exploration_rate=linear_decay(0.02, max_value=0.8, min_value=0.02),
   batch_size=batch_size,
   game_steps_per_step=game_steps_per_step,
-  copy_to_target_every=100,
-  game_steps_per_epoch=5000
+  copy_to_target_every=200,
+  game_steps_per_epoch=1000
 )
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
