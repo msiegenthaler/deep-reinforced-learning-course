@@ -105,11 +105,11 @@ def play_example(model: ExecutionModel, name='example', silent: bool = False) ->
       'image': exp.state_after[0],
       'action': action
     })
+    step += 1
     if exp.done:
       if not silent:
         print('Done')
       break
-    step += 1
 
   fig = plt.figure()
   movie_frames = []
