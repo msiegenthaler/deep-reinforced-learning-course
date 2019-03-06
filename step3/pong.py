@@ -7,7 +7,7 @@ from drl.deepq.learn import LearningModel
 from drl.deepq.networks import DuelingDQN
 from drl.deepq.replay_memory import PrioritizedReplayMemory
 from drl.deepq.train import TrainingHyperparameters, pretrain, resume_if_possible, linear_increase, linear_decay, \
-  play_and_remember_steps
+  play_and_remember_steps, train
 from drl.openai.pong import Pong
 
 game_steps_per_step = 4
@@ -16,7 +16,7 @@ batch_size = game_steps_per_step * batch_per_game_step
 
 w = h = 86
 t = 4
-memory_size = 1000000
+memory_size = 200000
 
 hyperparams = TrainingHyperparameters(
   gamma=0.99,
@@ -55,7 +55,7 @@ else:
   print('Pretraining finished')
 
 # %%
-#train(model, hyperparams, 10)
+# train(model, hyperparams, 10)
 
 # %%
-#play_example(model)
+# play_example(model)
