@@ -222,6 +222,7 @@ def resume_if_possible(model: LearningModel, suffix: str = 'last') -> bool:
 def play_and_remember_steps(model: LearningModel, hyperparameters: TrainingHyperparameters, batches: int = 10) -> None:
   exploration_rate = hyperparameters.exploration_rate(model.status.trained_for_epochs)
   steps = hyperparameters.batch_size * batches
+  model.game.reset()
   with timings['play']:
     state = model.game.current_state()
     for _ in range(steps):

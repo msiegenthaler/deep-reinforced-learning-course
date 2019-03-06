@@ -13,7 +13,6 @@ class OpenAIGame(Game, ABC):
   def __init__(self, scenario: str, t: int):
     self.env = gym.make(scenario)
     self.frames = Frames(t)
-    self._new_episode()
 
   def reset(self) -> State:
     self._new_episode()
