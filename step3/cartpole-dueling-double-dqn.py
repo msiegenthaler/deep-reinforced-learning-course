@@ -2,11 +2,12 @@
 import torch
 from torch.optim import RMSprop
 
-from drl.deepq.learn import LearningModel
+from drl.deepq.model import LearningModel
 from drl.deepq.networks import DuelingDQN
 from drl.deepq.replay_memory import PrioritizedReplayMemory
-from drl.deepq.train import TrainingHyperparameters, pretrain, resume_if_possible, linear_increase, linear_decay, \
+from drl.deepq.train import TrainingHyperparameters, pretrain, linear_increase, linear_decay, \
   play_and_remember_steps
+from drl.deepq.checkpoint import load_checkpoint
 from drl.openai.cartpole import CartPoleVisual
 
 game_steps_per_step = 2
@@ -47,7 +48,7 @@ model = LearningModel(
 print('Model prepared')
 
 # %%
-if resume_if_possible(model):
+if load_checkpoint(model):
   play_and_remember_steps(model, hyperparams)
   print('Resuming completed')
 else:

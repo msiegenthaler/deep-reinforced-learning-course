@@ -1,18 +1,13 @@
-from typing import Dict, NamedTuple
+from time import time
+from typing import Dict
 
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import torch
 from torch import nn, Tensor
 
-from drl.deepq.game import Game
-
-
-class ExecutionModel(NamedTuple):
-  policy_net: nn.Module
-  game: Game
-  device: object
-  strategy_name: str
+from drl.deepq.model import ExecutionModel, ValidationLog
+from drl.utils.stats import FloatStatCollector
 
 
 def best_action(device, policy_net: nn.Module, state: Tensor) -> int:
@@ -55,25 +50,34 @@ def run_episode(model: ExecutionModel) -> (float, int, Dict[str, int]):
   return total_reward, steps, actions
 
 
-def run_validation(model: ExecutionModel, count: int) -> object:
+def run_validation(model: ExecutionModel, epoch: int, count: int) -> ValidationLog:
   """
   Run multiple episodes to verify the performance
   :param model: the model to execute
+  :param epoch: the number of epochs to model was trained for (used in ValidationLog only)
   :param count: number of episodes to execute
   :return: (average rewards, array of episode rewards, total number of steps, action map)
   """
-  rewards = []
-  steps = 0
   actions = {}
   for a in model.game.actions:
     actions[a.name] = 0
+  t0 = time()
+  rewards = FloatStatCollector()
+  steps = 0
   for _ in range(count):
     reward, s, episode_actions = run_episode(model)
     for name, c in episode_actions.items():
       actions[name] += c
-    rewards.append(reward)
+    rewards.record(reward)
     steps += s
-  return sum(rewards) / count, rewards, steps, actions
+  return ValidationLog(
+    at_training_epoch=epoch,
+    episodes=count,
+    steps=steps,
+    duration_seconds=time() - t0,
+    episode_reward=rewards.get(),
+    actions_taken=actions
+  )
 
 
 def play_example(model: ExecutionModel, name='example', silent: bool = False) -> (str, int, float):

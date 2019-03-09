@@ -3,15 +3,16 @@ import torch
 from torch.optim import RMSprop
 
 from drl.deepq.execution import play_example
-from drl.deepq.learn import LearningModel
+from drl.deepq.model import LearningModel
 from drl.deepq.networks import DuelingDQN
 from drl.deepq.replay_memory import PrioritizedReplayMemory
-from drl.deepq.train import TrainingHyperparameters, pretrain, resume_if_possible, linear_increase, linear_decay, \
+from drl.deepq.train import TrainingHyperparameters, pretrain, linear_increase, linear_decay, \
   play_and_remember_steps, train
+from drl.deepq.checkpoint import load_checkpoint
 from drl.openai.pong import Pong
 
-game_steps_per_step = 4
-batch_per_game_step = 64
+game_steps_per_step = 1
+batch_per_game_step = 32
 batch_size = game_steps_per_step * batch_per_game_step
 
 w = h = 86
@@ -25,7 +26,7 @@ hyperparams = TrainingHyperparameters(
   batch_size=batch_size,
   game_steps_per_step=game_steps_per_step,
   copy_to_target_every=200,
-  game_steps_per_epoch=1000
+  game_steps_per_epoch=10
 )
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -47,7 +48,7 @@ model = LearningModel(
 print('Model prepared')
 
 # %%
-if resume_if_possible(model):
+if load_checkpoint(model):
   play_and_remember_steps(model, hyperparams)
   print('Resuming completed')
 else:
@@ -55,7 +56,6 @@ else:
   print('Pretraining finished')
 
 # %%
-# train(model, hyperparams, 10)
-
-# %%
-# play_example(model)
+def go():
+  train(model, hyperparams, 10)
+  play_example(model)

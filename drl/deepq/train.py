@@ -1,16 +1,16 @@
 import math
-import os
 import random
 from time import time
 from typing import NamedTuple, Callable
 
-import torch
 from torch import Tensor
 
-from drl.deepq.execution import best_action, run_validation, ExecutionModel, play_example
+from drl.deepq.checkpoint import save_checkpoint
+from drl.deepq.execution import best_action, run_validation, play_example
 from drl.deepq.game import Experience
-from drl.deepq.learn import learn_from_memory, LearningModel
-from drl.utils.timings import timings
+from drl.deepq.learn import learn_from_memory
+from drl.deepq.model import LearningModel, ExecutionModel, EpochTrainingLog
+from drl.utils.stats import FloatStatCollector
 
 
 def linear_decay(delta: float, min_value: float = 0., max_value: float = 1.):
@@ -67,7 +67,7 @@ def warm_up(model: LearningModel, rounds: int = 100) -> None:
       raise ValueError('infinite loss after part 2 round %d' % r)
 
 
-def pretrain(model: LearningModel, hyperparams: TrainingHyperparameters, warm_up_iterations = 500) -> None:
+def pretrain(model: LearningModel, hyperparams: TrainingHyperparameters, warm_up_iterations=500) -> None:
   prefill_memory(model, hyperparams.batch_size)
   warm_up(model, warm_up_iterations)
 
@@ -86,56 +86,68 @@ def train_step(model: LearningModel, hyperparameters: TrainingHyperparameters,
   """
   :return: (average loss, experiences)
   """
-  with timings['step']:
+  with model.status.timings['step']:
     exps = []
-    with timings['play']:
+    with model.status.timings['play']:
       state = model.game.current_state()
       for _ in range(hyperparameters.game_steps_per_step):
-        with timings['forward action']:
+        with model.status.timings['forward action']:
           action = chose_action(model, state, exploration_rate)
-        with timings['game']:
+        with model.status.timings['game']:
           exp = model.game.step(model.game.actions[action])
         state = exp.state_after
-        with timings['remember']:
+        with model.status.timings['remember']:
           model.memory.remember(exp)
         exps.append(exp)
 
-    with timings['learn']:
+    with model.status.timings['learn']:
       loss = learn_from_memory(model, hyperparameters.batch_size, hyperparameters.gamma, beta)
     if math.isnan(loss) or math.isinf(loss):
       raise ValueError('infinite loss')
 
-    model.status.trained_for_steps += 1
     return loss, exps
 
 
-def train_epoch(model: LearningModel, hyperparameters: TrainingHyperparameters, beta, exploration_rate,
-                steps: int) -> (int, [Experience], float):
+def train_epoch(model: LearningModel, hyperparameters: TrainingHyperparameters, beta: float, exploration_rate: float,
+                steps: int) -> EpochTrainingLog:
   """
   :return: (episodes, experiences, average loss)
   """
-  with timings['epoch']:
-    episode_reward = 0
-    episode_rewards = []
-    total_loss = 0.
+  t0 = time()
+  with model.status.timings['epoch']:
     model.policy_net.train()
+    episode_rewards = FloatStatCollector()
+    total_loss = FloatStatCollector()
+    episode_reward = 0
     for step in range(steps):
       loss, exps = train_step(model, hyperparameters, beta, exploration_rate)
-      total_loss += loss
+      total_loss.record(loss)
 
       for exp in exps:
         episode_reward += exp.reward
         if exp.done:
-          model.status.trained_for_episodes += 1
-          episode_rewards.append(episode_reward)
+          episode_rewards.record(episode_reward)
           episode_reward = 0
 
       if step % hyperparameters.copy_to_target_every == 0:
         model.target_net.load_state_dict(model.policy_net.state_dict())
 
+    # copy to target at the end of the epoch
     model.target_net.load_state_dict(model.policy_net.state_dict())
-    model.status.trained_for_epochs += 1
-    return len(episode_rewards), episode_rewards, total_loss / steps
+
+  er = episode_rewards.get()
+  params = hyperparameters._asdict()
+  params['beta'] = beta
+  params['exploration_rate'] = exploration_rate
+  return EpochTrainingLog(
+    episodes=er.count,
+    trainings=steps,
+    game_steps=steps * hyperparameters.game_steps_per_step,
+    parameter_values=params,
+    loss=total_loss.get(),
+    episode_reward=er,
+    duration_seconds=time() - t0
+  )
 
 
 def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epochs,
@@ -161,19 +173,10 @@ def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epoc
     beta = hyperparams.beta(model.status.trained_for_epochs)
 
     t0 = time()
-    episodes, rewards, avg_loss = train_epoch(model, hyperparams, beta, exploration_rate, learning_steps_per_epoch)
-    steps_per_second = learning_steps_per_epoch / (time() - t0) * hyperparams.game_steps_per_step
-    if episodes != 0:
-      print(
-        ('Epoch %3d: %2d eps.\texpl: %4.2f beta %4.2f\trewards: %4.0f (%4.0f to %4.0f)' +
-         '\tloss: %4.2f\t%4.1f step/s (%d steps, %d episodes)') %
-        (model.status.trained_for_epochs, episodes, exploration_rate, beta,
-         sum(rewards) / episodes, min(rewards), max(rewards), avg_loss, steps_per_second,
-         model.status.trained_for_steps, model.status.trained_for_episodes))
-    else:
-      print('Epoch %3d:  0 eps.\texpl: %.2f  beta %.2f\tloss: %.2f\t%4.1f step/s (%d steps, %d episodes)' %
-            (model.status.trained_for_epochs, exploration_rate, beta, avg_loss, steps_per_second,
-             model.status.trained_for_steps, model.status.trained_for_episodes))
+    epoch_log = train_epoch(model, hyperparams, beta, exploration_rate, learning_steps_per_epoch)
+
+    model.status.training_log.append(epoch_log)
+    log_training(model, epoch_log)
 
     if validation_episodes > 0:
       print_validation(model, validation_episodes)
@@ -188,65 +191,50 @@ def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epoc
   print('Done training for %d epochs' % train_epochs)
 
 
-def save_checkpoint(model: LearningModel):
-  data = {
-    'epoch': model.status.trained_for_epochs,
-    'episodes': model.status.trained_for_episodes,
-    'steps': model.status.trained_for_steps,
-    'optimizer_state_dict': model.optimizer.state_dict(),
-    'model_state_dict': model.policy_net.state_dict()
-  }
-  file = 'checkpoints/%s-%s-%04d.pt' % (model.game.name, model.strategy_name, model.status.trained_for_epochs)
-  torch.save(data, file)
-  last_file = 'checkpoints/%s-%s-last.pt' % (model.game.name, model.strategy_name)
-  torch.save(data, last_file)
-  print(' - saved checkpoint to', file)
-
-
-def resume_if_possible(model: LearningModel, suffix: str = 'last') -> bool:
-  file = 'checkpoints/%s-%s-%s.pt' % (model.game.name, model.strategy_name, suffix)
-  if os.path.isfile(file):
-    data = torch.load(file)
-    model.status.trained_for_epochs = data['epoch']
-    model.status.trained_for_episodes = data['episodes'] if 'episodes' in data else 0
-    model.status.trained_for_steps = data['steps']
-    model.optimizer.load_state_dict(data['optimizer_state_dict'])
-    model.policy_net.load_state_dict(data['model_state_dict'])
-    model.target_net.load_state_dict(data['model_state_dict'])
-    print('loaded checkpoint from', file)
-    return True
+def log_training(model: LearningModel, epoch_log: EpochTrainingLog) -> None:
+  if epoch_log.episodes != 0:
+    print(
+      ('Epoch %3d: %2d eps.\texpl: %4.2f beta %4.2f\trewards: %4.0f (%4.0f to %4.0f)' +
+       '\tloss: %4.2f\t%4.1f step/s (%d steps, %d episodes)') %
+      (model.status.trained_for_epochs, epoch_log.episodes,
+       epoch_log.parameter_values['exploration_rate'], epoch_log.parameter_values['beta'],
+       epoch_log.episode_reward.mean, epoch_log.episode_reward.min, epoch_log.episode_reward.max,
+       epoch_log.loss.mean,
+       epoch_log.game_steps / epoch_log.duration_seconds,
+       model.status.trained_for_steps, model.status.trained_for_episodes))
   else:
-    return False
+    print('Epoch %3d:  0 eps.\texpl: %.2f  beta %.2f\tloss: %.2f\t%4.1f step/s (%d steps, %d episodes)' %
+          (model.status.trained_for_epochs,
+           epoch_log.parameter_values['exploration_rate'], epoch_log.parameter_values['beta'],
+           epoch_log.loss.mean,
+           epoch_log.game_steps / epoch_log.duration_seconds,
+           model.status.trained_for_steps, model.status.trained_for_episodes))
 
 
 def play_and_remember_steps(model: LearningModel, hyperparameters: TrainingHyperparameters, batches: int = 10) -> None:
   exploration_rate = hyperparameters.exploration_rate(model.status.trained_for_epochs)
   steps = hyperparameters.batch_size * batches
   model.game.reset()
-  with timings['play']:
+  with model.status.timings['play']:
     state = model.game.current_state()
     for _ in range(steps):
-      with timings['forward action']:
+      with model.status.timings['forward action']:
         action = chose_action(model, state, exploration_rate)
-      with timings['game']:
+      with model.status.timings['game']:
         exp = model.game.step(model.game.actions[action])
       state = exp.state_after
-      with timings['remember']:
+      with model.status.timings['remember']:
         model.memory.remember(exp)
-
-
-def model_to_exec(model: LearningModel) -> ExecutionModel:
-  return ExecutionModel(policy_net=model.policy_net, device=model.device, game=model.game,
-                        strategy_name=model.strategy_name)
 
 
 def print_validation(model: LearningModel, episodes: int):
   # noinspection PyTypeChecker
-  val_rewards_avg, val_rewards, val_steps, val_actions = run_validation(model, episodes)
+  log = run_validation(model, model.status.trained_for_epochs, episodes)
+  model.status.validation_log.append(log)
 
   actions = []
-  for name, cnt in val_actions.items():
-    actions.append('%s: %.2f' % (name, cnt / val_steps))
+  for name, cnt in log.actions_taken.items():
+    actions.append('%s: %.2f' % (name, cnt / log.steps))
 
   print(' - validation %4.0f    (min: %4.0f, max %4.0f)\t%s' % (
-    val_rewards_avg, min(val_rewards), max(val_rewards), ", ".join(actions)))
+    log.episode_reward.mean, log.episode_reward.min, log.episode_reward.max, ",  ".join(actions)))

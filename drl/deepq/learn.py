@@ -1,29 +1,9 @@
-from typing import NamedTuple
-
 import torch
 import torch.nn.functional as F
-from torch import nn, Tensor, tensor
-from torch.optim import Optimizer
+from torch import Tensor, tensor
 
-from drl.deepq.game import Experience, Game
-from drl.deepq.replay_memory import ReplayMemory
-from drl.utils.timings import timings
-
-class TrainingStatus:
-  def __init__(self):
-    self.trained_for_epochs = 0
-    self.trained_for_steps = 0
-    self.trained_for_episodes = 0
-
-class LearningModel(NamedTuple):
-  target_net: nn.Module
-  policy_net: nn.Module
-  optimizer: Optimizer
-  game: Game
-  memory: ReplayMemory
-  device: object  # Device to train on
-  strategy_name: str
-  status: TrainingStatus = TrainingStatus()
+from drl.deepq.game import Experience
+from drl.deepq.model import LearningModel
 
 
 def get_target_action_values(model: LearningModel, gamma: float, exps: [Experience]) -> Tensor:
@@ -43,6 +23,7 @@ def get_target_action_values(model: LearningModel, gamma: float, exps: [Experien
 
 def calculate_losses(model: LearningModel, gamma: float, exps: [Experience]) -> Tensor:
   """
+  :param model: the model
   :param gamma: discounting factor for future (next-step) rewards (e.g. 0.99)
   :param exps: Experiences calculate losses for
   """
@@ -59,6 +40,8 @@ def calculate_losses(model: LearningModel, gamma: float, exps: [Experience]) -> 
 
 def learn_from_memory(model: LearningModel, batch_size: int, gamma: float, beta: float) -> float:
   """
+  :param model: the model
+  :param batch_size: number of examples to process together
   :param gamma: discounting factor for future (next-step) rewards (e.g. 0.99)
   :param beta: weighting of priorized experiences [0=no correction, 1=uniform]
   :returns the (average) loss
@@ -66,24 +49,24 @@ def learn_from_memory(model: LearningModel, batch_size: int, gamma: float, beta:
   if model.memory.size() < batch_size:
     raise ValueError('memory contains less than batch_size (%d) samples' % batch_size)
 
-  with timings['sample from memory']:
+  with model.status.timings['sample from memory']:
     sample = model.memory.sample(batch_size)
     exps = [s.experience for s in sample]
     weights = tensor([s.weight(beta) for s in sample])
     weights = weights.to(model.device)
 
-  with timings['forward loss']:
+  with model.status.timings['forward loss']:
     losses = calculate_losses(model, gamma, exps)
     loss = torch.mean(losses * weights)
 
-  with timings['backprop loss']:
+  with model.status.timings['backprop loss']:
     model.optimizer.zero_grad()
     loss.backward()
     model.optimizer.step()
     if torch.cuda.is_available():
       torch.cuda.synchronize()  # for the timings
 
-  with timings['update memory weights']:
+  with model.status.timings['update memory weights']:
     model.memory.update_weights(sample, losses.detach())
 
   return loss.item()

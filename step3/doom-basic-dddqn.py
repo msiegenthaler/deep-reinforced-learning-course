@@ -3,7 +3,7 @@ import torch
 from torch.optim import RMSprop
 
 from drl.deepq.execution import play_example
-from drl.deepq.learn import LearningModel
+from drl.deepq.model import LearningModel
 from drl.deepq.networks import DuelingDQN
 from drl.deepq.replay_memory import PrioritizedReplayMemory
 from drl.deepq.train import TrainingHyperparameters, pretrain, linear_increase, linear_decay, train
