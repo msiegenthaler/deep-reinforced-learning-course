@@ -192,12 +192,12 @@ def log_training(model: LearningModel, epoch_log: EpochTrainingLog) -> None:
            model.status.trained_for_steps, model.status.trained_for_episodes))
 
 
-def play_and_remember_steps(model: LearningModel, hyperparameters: TrainingHyperparameters, batches: int = 10) -> None:
-  exploration_rate = hyperparameters.exploration_rate(model.status.trained_for_epochs)
-  steps = hyperparameters.batch_size * batches
-  model.game.reset()
+def play_and_remember_steps(model: LearningModel, hyperparams: TrainingHyperparameters, batches: int = 10) -> None:
+  exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
+  steps = hyperparams.batch_size * batches
+  state = model.game.reset()
+  experience_buffer = create_experience_buffer(hyperparams.multi_step_n, hyperparams.gamma)
   with model.status.timings['play']:
-    state = model.game.current_state()
     for _ in range(steps):
       with model.status.timings['forward action']:
         action = chose_action(model, state, exploration_rate)
@@ -205,7 +205,8 @@ def play_and_remember_steps(model: LearningModel, hyperparameters: TrainingHyper
         exp = model.game.step(model.game.actions[action])
       state = exp.state_after
       with model.status.timings['remember']:
-        model.memory.remember(exp)
+        for e in experience_buffer.process(exp):
+          model.memory.remember(e)
 
 
 def print_validation(model: LearningModel, episodes: int):

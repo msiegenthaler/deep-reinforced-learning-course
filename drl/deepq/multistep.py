@@ -38,7 +38,7 @@ class MultiStepBuffer(ExperienceBuffer):
       for t in range(self.n - 1):
         reward += (self.gamma ** t) * self.buffer[t].reward
       ret = self.buffer.pop()
-      ret._replace(reward=reward, state_after=exp.state_after, state_difference_in_steps=self.n)
+      ret = ret._replace(reward=reward, state_after=exp.state_after, state_difference_in_steps=self.n)
       return [ret]
     else:
       return []
