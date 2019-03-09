@@ -28,7 +28,7 @@ def save_checkpoint(model: LearningModel) -> str:
 def load_checkpoint(model: LearningModel, suffix: str = 'last') -> bool:
   file = 'checkpoints/%s-%s-%s.pt' % (model.game.name, model.strategy_name, suffix)
   if os.path.isfile(file):
-    data = torch.load(file)
+    data = torch.load(file, map_location=model.device)
     model.status.training_log = data['status_trainingLog']
     model.status.validation_log = data['status_validationLog']
     model.status.timings.reset()
