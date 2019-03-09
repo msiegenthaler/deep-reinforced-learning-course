@@ -11,7 +11,7 @@ from drl.deepq.train import TrainingHyperparameters, pretrain, linear_increase, 
 from drl.deepq.checkpoint import load_checkpoint
 from drl.openai.pong import Pong
 
-game_steps_per_step = 1
+game_steps_per_step = 4
 batch_per_game_step = 32
 batch_size = game_steps_per_step * batch_per_game_step
 

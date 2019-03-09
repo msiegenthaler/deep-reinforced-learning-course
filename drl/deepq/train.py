@@ -7,7 +7,6 @@ from torch import Tensor
 
 from drl.deepq.checkpoint import save_checkpoint
 from drl.deepq.execution import best_action, run_validation, play_example
-from drl.deepq.game import Experience
 from drl.deepq.learn import learn_from_memory
 from drl.deepq.model import LearningModel, EpochTrainingLog
 from drl.deepq.multistep import create_experience_buffer
@@ -85,35 +84,8 @@ def chose_action(model: LearningModel, state: Tensor, exploration_rate: float) -
   return best_action(model.device, model.policy_net, state)
 
 
-def train_step(model: LearningModel, hyperparameters: TrainingHyperparameters,
-               beta, exploration_rate) -> (float, [Experience]):
-  """
-  :return: (average loss, experiences)
-  """
-  with model.status.timings['step']:
-    exps = []
-    with model.status.timings['play']:
-      state = model.game.current_state()
-      for _ in range(hyperparameters.game_steps_per_step):
-        with model.status.timings['forward action']:
-          action = chose_action(model, state, exploration_rate)
-        with model.status.timings['game']:
-          exp = model.game.step(model.game.actions[action])
-        state = exp.state_after
-        with model.status.timings['remember']:
-          model.memory.remember(exp)
-        exps.append(exp)
-
-    with model.status.timings['learn']:
-      loss = learn_from_memory(model, hyperparameters.batch_size, hyperparameters.gamma, beta)
-    if math.isnan(loss) or math.isinf(loss):
-      raise ValueError('infinite loss')
-
-    return loss, exps
-
-
-def train_epoch_nstep(model: LearningModel, hyperparams: TrainingHyperparameters, beta: float,
-                      exploration_rate: float) -> EpochTrainingLog:
+def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta: float,
+                exploration_rate: float) -> EpochTrainingLog:
   model.policy_net.train()
   t0 = time()
   episode_rewards = FloatStatCollector()
@@ -121,22 +93,26 @@ def train_epoch_nstep(model: LearningModel, hyperparams: TrainingHyperparameters
   experience_buffer = create_experience_buffer(hyperparams.multi_step_n, hyperparams.gamma)
   state = model.game.reset()
   use_gamma = hyperparams.gamma ** hyperparams.multi_step_n  # adjust gamma for multistep
+  steps = math.ceil(hyperparams.game_steps_per_epoch // hyperparams.game_steps_per_step)
   episode_reward = 0
   with model.status.timings['epoch']:
-    for step in range(hyperparams.game_steps_per_epoch):
+    for step in range(steps):
       with model.status.timings['play']:
-        with model.status.timings['forward action']:
-          action_index = chose_action(model, state, exploration_rate)
-        with model.status.timings['game']:
-          exp = model.game.step(model.game.actions[action_index])
-          episode_reward += exp.reward
-          if exp.done:
-            episode_rewards.record(episode_reward)
-            episode_reward = 0
+        for _ in range(hyperparams.game_steps_per_step):
+          with model.status.timings['forward action']:
+            action_index = chose_action(model, state, exploration_rate)
 
-        with model.status.timings['remember']:
-          for e in experience_buffer.process(exp):
-            model.memory.remember(e)
+          with model.status.timings['game']:
+            exp = model.game.step(model.game.actions[action_index])
+            state = exp.state_after
+            episode_reward += exp.reward
+            if exp.done:
+              episode_rewards.record(episode_reward)
+              episode_reward = 0
+
+          with model.status.timings['remember']:
+            for e in experience_buffer.process(exp):
+              model.memory.remember(e)
 
       with model.status.timings['learn']:
         if step % hyperparams.copy_to_target_every == 0:
@@ -150,48 +126,8 @@ def train_epoch_nstep(model: LearningModel, hyperparams: TrainingHyperparameters
   params['exploration_rate'] = exploration_rate
   return EpochTrainingLog(
     episodes=er.count,
-    trainings=hyperparams.game_steps_per_epoch,
-    game_steps=hyperparams.game_steps_per_epoch,
-    parameter_values=params,
-    loss=total_loss.get(),
-    episode_reward=er,
-    duration_seconds=time() - t0
-  )
-
-
-def train_epoch(model: LearningModel, hyperparameters: TrainingHyperparameters, beta: float,
-                exploration_rate: float) -> EpochTrainingLog:
-  t0 = time()
-  steps = math.ceil(hyperparameters.game_steps_per_epoch // hyperparameters.game_steps_per_step)
-  with model.status.timings['epoch']:
-    model.policy_net.train()
-    episode_rewards = FloatStatCollector()
-    total_loss = FloatStatCollector()
-    episode_reward = 0
-    for step in range(steps):
-      loss, exps = train_step(model, hyperparameters, beta, exploration_rate)
-      total_loss.record(loss)
-
-      for exp in exps:
-        episode_reward += exp.reward
-        if exp.done:
-          episode_rewards.record(episode_reward)
-          episode_reward = 0
-
-      if step % hyperparameters.copy_to_target_every == 0:
-        model.target_net.load_state_dict(model.policy_net.state_dict())
-
-    # copy to target at the end of the epoch
-    model.target_net.load_state_dict(model.policy_net.state_dict())
-
-  er = episode_rewards.get()
-  params = hyperparameters._asdict()
-  params['beta'] = beta
-  params['exploration_rate'] = exploration_rate
-  return EpochTrainingLog(
-    episodes=er.count,
     trainings=steps,
-    game_steps=hyperparameters.game_steps_per_step,
+    game_steps=hyperparams.game_steps_per_epoch,
     parameter_values=params,
     loss=total_loss.get(),
     episode_reward=er,
@@ -219,7 +155,7 @@ def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epoc
     exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
     beta = hyperparams.beta(model.status.trained_for_epochs)
 
-    epoch_log = train_epoch_nstep(model, hyperparams, beta, exploration_rate)
+    epoch_log = train_epoch(model, hyperparams, beta, exploration_rate)
 
     model.status.training_log.append(epoch_log)
     log_training(model, epoch_log)
@@ -274,7 +210,7 @@ def play_and_remember_steps(model: LearningModel, hyperparameters: TrainingHyper
 
 
 def print_validation(model: LearningModel, episodes: int):
-  log = run_validation(model.exec(), model.status.trained_for_epochs, episodes)
+  log = run_validation(model.exec(), episodes)
   model.status.validation_log.append(log)
 
   actions = []

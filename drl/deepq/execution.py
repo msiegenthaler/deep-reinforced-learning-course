@@ -50,11 +50,10 @@ def run_episode(model: ExecutionModel) -> (float, int, Dict[str, int]):
   return total_reward, steps, actions
 
 
-def run_validation(model: ExecutionModel, epoch: int, count: int) -> ValidationLog:
+def run_validation(model: ExecutionModel, count: int) -> ValidationLog:
   """
   Run multiple episodes to verify the performance
   :param model: the model to execute
-  :param epoch: the number of epochs to model was trained for (used in ValidationLog only)
   :param count: number of episodes to execute
   :return: (average rewards, array of episode rewards, total number of steps, action map)
   """
@@ -71,7 +70,7 @@ def run_validation(model: ExecutionModel, epoch: int, count: int) -> ValidationL
     rewards.record(reward)
     steps += s
   return ValidationLog(
-    at_training_epoch=epoch,
+    at_training_epoch=model.trained_for_epochs,
     episodes=count,
     steps=steps,
     duration_seconds=time() - t0,

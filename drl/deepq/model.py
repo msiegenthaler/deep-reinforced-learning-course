@@ -52,6 +52,8 @@ class ExecutionModel(NamedTuple):
   policy_net: nn.Module
   game: Game
   device: object
+  strategy_name: str
+  trained_for_epochs: int
 
 
 class LearningModel(NamedTuple):
@@ -68,5 +70,7 @@ class LearningModel(NamedTuple):
     return ExecutionModel(
       policy_net=self.policy_net,
       game=self.game,
-      device=self.device
+      device=self.device,
+      strategy_name=self.strategy_name,
+      trained_for_epochs=self.status.trained_for_epochs
     )
