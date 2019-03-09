@@ -1,11 +1,25 @@
 import abc
-from collections import namedtuple, deque
+from collections import deque
+from typing import NamedTuple
 
 import torch
 
-Action = namedtuple("Action", "name key index")
-Experience = namedtuple("Experience", "state_before action state_after reward done")
+
+class Action(NamedTuple):
+  name: str
+  index: int
+  key: any  # private for usage by the game
+
+
 State = torch.Tensor
+
+
+class Experience(NamedTuple):
+  state_before: State
+  action: Action
+  state_after: State
+  reward: float
+  done: bool
 
 
 class Game(abc.ABC):
