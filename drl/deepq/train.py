@@ -110,9 +110,6 @@ def train_step(model: LearningModel, hyperparameters: TrainingHyperparameters,
 
 def train_epoch(model: LearningModel, hyperparameters: TrainingHyperparameters, beta: float, exploration_rate: float,
                 steps: int) -> EpochTrainingLog:
-  """
-  :return: (episodes, experiences, average loss)
-  """
   t0 = time()
   with model.status.timings['epoch']:
     model.policy_net.train()
