@@ -75,13 +75,14 @@ def pretrain(model: LearningModel, hyperparams: TrainingHyperparameters, warm_up
   warm_up(model, warm_up_iterations)
 
 
-def chose_action(model: LearningModel, state: Tensor, exploration_rate: float) -> int:
+def chose_action(model: LearningModel, state: Tensor, exploration_rate: float) -> (int, bool):
   """
-  :returns index of the chosen action
+  :returns (index of the chosen action, whether the action is 'best' (True) or random (False))
   """
   if random.random() < exploration_rate:
-    return random.randrange(model.policy_net.action_count)
-  return best_action(model.device, model.policy_net, state)
+    return random.randrange(model.policy_net.action_count), False
+  action = best_action(model.device, model.policy_net, state)
+  return action, True
 
 
 def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta: float,
@@ -99,7 +100,7 @@ def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta
       with model.status.timings['play']:
         for _ in range(hyperparams.game_steps_per_step):
           with model.status.timings['forward action']:
-            action_index = chose_action(model, state, exploration_rate)
+            action_index, best = chose_action(model, state, exploration_rate)
 
           with model.status.timings['game']:
             exp = model.game.step(model.game.actions[action_index])
@@ -110,7 +111,7 @@ def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta
               episode_reward = 0
 
           with model.status.timings['remember']:
-            for e in experience_buffer.process(exp):
+            for e in experience_buffer.process(exp, best):
               model.memory.remember(e)
 
       with model.status.timings['learn']:
@@ -200,12 +201,12 @@ def play_and_remember_steps(model: LearningModel, hyperparams: TrainingHyperpara
   with model.status.timings['play']:
     for _ in range(steps):
       with model.status.timings['forward action']:
-        action = chose_action(model, state, exploration_rate)
+        action, best = chose_action(model, state, exploration_rate)
       with model.status.timings['game']:
         exp = model.game.step(model.game.actions[action])
       state = exp.state_after
       with model.status.timings['remember']:
-        for e in experience_buffer.process(exp):
+        for e in experience_buffer.process(exp, best):
           model.memory.remember(e)
 
 

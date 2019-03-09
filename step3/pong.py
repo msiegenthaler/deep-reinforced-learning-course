@@ -53,7 +53,7 @@ if load_checkpoint(model):
   play_and_remember_steps(model, hyperparams)
   print('Resuming completed')
 else:
-  pretrain(model, hyperparams)
+  pretrain(model, hyperparams, 0)
   print('Pretraining finished')
 
 # %%
