@@ -14,7 +14,8 @@ def save_checkpoint(model: LearningModel) -> str:
     'status_validationLog': model.status.validation_log,
     'steps': model.status.trained_for_steps,
     'optimizer_state_dict': model.optimizer.state_dict(),
-    'model_state_dict': model.policy_net.state_dict()
+    'model_state_dict': model.policy_net.state_dict(),
+    'model_description': str(model.policy_net)
   }
   file = 'checkpoints/%s-%s-%04d.pt' % (model.game.name, model.strategy_name, model.status.trained_for_epochs)
   torch.save(data, file)
