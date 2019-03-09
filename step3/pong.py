@@ -26,7 +26,8 @@ hyperparams = TrainingHyperparameters(
   batch_size=batch_size,
   game_steps_per_step=game_steps_per_step,
   copy_to_target_every=200,
-  game_steps_per_epoch=10
+  game_steps_per_epoch=10,
+  multi_step_n=5
 )
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
