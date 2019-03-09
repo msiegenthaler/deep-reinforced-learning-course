@@ -26,11 +26,11 @@ class MultiStepBuffer(ExperienceBuffer):
     self.buffer.append(exp)
     if exp.done:
       exps = [exp]
-      reward = 0
+      reward = exp.reward
       for t in range(len(self.buffer) - 2, -1, -1):  # skip exp
         e = self.buffer[t]
         reward = e.reward + reward * self.gamma
-        exps.append(e._replace(reward=reward, state_after=exp.state_after))
+        exps.append(e._replace(reward=reward, state_after=exp.state_after, state_difference_in_steps=self.n - t))
       self.buffer = []
       return exps
     elif len(self.buffer) >= self.n:
@@ -38,7 +38,7 @@ class MultiStepBuffer(ExperienceBuffer):
       for t in range(self.n - 1):
         reward += (self.gamma ** t) * self.buffer[t].reward
       ret = self.buffer.pop()
-      ret._replace(reward=reward, state_after=exp.state_after)
+      ret._replace(reward=reward, state_after=exp.state_after, state_difference_in_steps=self.n)
       return [ret]
     else:
       return []

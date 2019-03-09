@@ -15,9 +15,11 @@ def get_target_action_values(model: LearningModel, gamma: float, exps: [Experien
   non_final_mask = tensor(tuple(map(lambda e: not e.done, exps)), device=model.device, dtype=torch.uint8)
   next_state_values = torch.zeros(len(exps), device=model.device)
   next_state_values[non_final_mask] = model.target_net(next_states).max(1)[0].detach()
+  lengths = tensor([e.state_difference_in_steps for e in exps]).to(model.device)
+  gammas = torch.pow(tensor(gamma), lengths.float())
 
   rewards = tensor([e.reward for e in exps], device=model.device)
-  target_action_values = (next_state_values * gamma) + rewards
+  target_action_values = (next_state_values * gammas) + rewards
   return target_action_values.unsqueeze(1)
 
 

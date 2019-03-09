@@ -92,7 +92,6 @@ def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta
   total_loss = FloatStatCollector()
   experience_buffer = create_experience_buffer(hyperparams.multi_step_n, hyperparams.gamma)
   state = model.game.reset()
-  use_gamma = hyperparams.gamma ** hyperparams.multi_step_n  # adjust gamma for multistep
   steps = math.ceil(hyperparams.game_steps_per_epoch // hyperparams.game_steps_per_step)
   episode_reward = 0
   with model.status.timings['epoch']:
@@ -117,7 +116,7 @@ def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta
       with model.status.timings['learn']:
         if step % hyperparams.copy_to_target_every == 0:
           model.target_net.load_state_dict(model.policy_net.state_dict())
-        loss = learn_from_memory(model, hyperparams.batch_size, use_gamma, beta)
+        loss = learn_from_memory(model, hyperparams.batch_size, hyperparams.gamma, beta)
         total_loss.record(loss)
 
   er = episode_rewards.get()

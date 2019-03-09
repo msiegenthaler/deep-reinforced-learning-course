@@ -7,8 +7,8 @@ import torch
 
 class Action(NamedTuple):
   name: str
-  index: int
   key: any  # private for usage by the game
+  index: int
 
 
 State = torch.Tensor
@@ -20,6 +20,7 @@ class Experience(NamedTuple):
   state_after: State
   reward: float
   done: bool
+  state_difference_in_steps: int = 1  # number of steps between state_before and state_after
 
 
 class Game(abc.ABC):
