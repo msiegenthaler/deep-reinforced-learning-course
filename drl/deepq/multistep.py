@@ -43,7 +43,7 @@ class MultiStepBuffer(ExperienceBuffer):
       reward = e.reward + reward * self.gamma
       exps.append(e._replace(
         reward=reward, state_after=exp.state_after, state_difference_in_steps=len(self.buffer) - t))
-    self.buffer = [exp]
+    self.buffer = deque([exp])
     return exps
 
   def _process_best(self, exp: Experience) -> [Experience]:
@@ -56,13 +56,13 @@ class MultiStepBuffer(ExperienceBuffer):
         reward = e.reward + reward * self.gamma
         exps.append(e._replace(
           reward=reward, state_after=exp.state_after, state_difference_in_steps=len(self.buffer) - t))
-      self.buffer = []
-      return exps
+      self.buffer = deque()
+      return exps.reverse()  # just because it easier to debug
     elif len(self.buffer) >= self.n:
       reward = 0
-      for t in range(self.n - 1):
+      for t in range(self.n):
         reward += (self.gamma ** t) * self.buffer[t].reward
-      ret = self.buffer.pop()
+      ret = self.buffer.popleft()
       ret = ret._replace(reward=reward, state_after=exp.state_after, state_difference_in_steps=self.n)
       return [ret]
     else:
