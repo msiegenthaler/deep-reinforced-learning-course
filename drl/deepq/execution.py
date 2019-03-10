@@ -19,7 +19,9 @@ def best_action(device, policy_net: nn.Module, state: Tensor) -> int:
     # t.max(1) will return largest column value of each row.
     # second column on max result is index of where max element was
     # found, so we pick action with the larger expected reward.
-    return policy_net(s).max(1)[1].view(1, 1).item()
+    qs = policy_net(s)
+    index = qs.max(1)[1].view(1, 1).item()
+    return index
 
 
 def run_episode(model: ExecutionModel) -> (float, int, Dict[str, int]):

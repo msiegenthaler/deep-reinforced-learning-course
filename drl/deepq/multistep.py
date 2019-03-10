@@ -9,10 +9,7 @@ from drl.deepq.game import Experience
 class ExperienceBuffer(ABC):
   @abc.abstractmethod
   def process(self, exp: Experience, best: bool) -> [Experience]:
-    if best:
-      return self.process_best(exp)
-    else:
-      return self.process_random(exp)
+    pass
 
 
 class SingleStep(ExperienceBuffer):
