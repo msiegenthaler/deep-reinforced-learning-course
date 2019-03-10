@@ -118,6 +118,8 @@ def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta
         if step % hyperparams.copy_to_target_every == 0:
           model.target_net.load_state_dict(model.policy_net.state_dict())
         loss = learn_from_memory(model, hyperparams.batch_size, hyperparams.gamma, beta)
+        if math.isnan(loss) or math.isinf(loss):
+          raise ValueError('infinite loss')
         total_loss.record(loss)
 
   er = episode_rewards.get()
