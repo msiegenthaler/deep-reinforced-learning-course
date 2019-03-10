@@ -1,7 +1,7 @@
 import torchvision.transforms as T
 
 from drl.deepq.game import Action
-from drl.openai.atari_wrappers import NoopResetEnv, FireResetEnv
+from drl.openai.atari_wrappers import EpisodicLifeEnv, NoopResetEnv, MaxAndSkipEnv, FireResetEnv
 from drl.openai.game_openai import OpenAIGame
 
 
@@ -9,10 +9,12 @@ class Pong(OpenAIGame):
   actions = [Action('up', 2, 0),
              Action('down', 3, 1)]
 
-  def __init__(self, x: int, y: int, t: int):
+  def __init__(self, x: int, y: int, t: int, skip: int = 0):
     self.transform = T.Compose([T.ToPILImage(), T.Resize((y, x)), T.Grayscale(), T.ToTensor()])
     super().__init__('Pong-v0', t)
-    self.env = NoopResetEnv(FireResetEnv(self.env))
+    if (skip > 0):
+      self.env = MaxAndSkipEnv(self.env, skip)
+    self.env = EpisodicLifeEnv(NoopResetEnv(FireResetEnv(self.env)))
 
   @property
   def name(self) -> str:
