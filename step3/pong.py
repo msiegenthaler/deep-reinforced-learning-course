@@ -1,6 +1,6 @@
 # %%
 import torch
-from torch.optim import RMSprop
+from torch.optim import RMSprop, Adam
 
 from drl.deepq.execution import play_example
 from drl.deepq.learn import LearningModel
@@ -11,21 +11,22 @@ from drl.deepq.train import TrainingHyperparameters, pretrain, resume_if_possibl
 from drl.openai.pong import Pong
 
 game_steps_per_step = 4
-batch_per_game_step = 64
+batch_per_game_step = 32
 batch_size = game_steps_per_step * batch_per_game_step
 
 w = h = 86
 t = 4
 memory_size = 200000
 
+f = 5
 hyperparams = TrainingHyperparameters(
   gamma=0.99,
-  beta=linear_increase(0.05),
-  exploration_rate=linear_decay(0.02, max_value=0.8, min_value=0.02),
+  beta=linear_increase(0.05*f),
+  exploration_rate=linear_decay(0.01*f, max_value=0.8, min_value=0.02),
   batch_size=batch_size,
   game_steps_per_step=game_steps_per_step,
-  copy_to_target_every=200,
-  game_steps_per_epoch=1000
+  copy_to_target_every=1000,
+  game_steps_per_epoch=1000*f
 )
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -40,7 +41,7 @@ model = LearningModel(
   memory=memory,
   policy_net=policy_net,
   target_net=DuelingDQN(w, h, t, len(game.actions)).to(device),
-  optimizer=RMSprop(policy_net.parameters()),
+  optimizer=Adam(policy_net.parameters(), lr=1e-4),
   strategy_name='pdddq',
   device=device
 )

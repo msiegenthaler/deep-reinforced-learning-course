@@ -21,7 +21,7 @@ memory_size = 100000
 hyperparams = TrainingHyperparameters(
   gamma=0.9,
   beta=linear_increase(0.05),
-  exploration_rate=linear_decay(0.02, max_value=0.8, min_value=0.1),
+  exploration_rate=linear_decay(0.01, max_value=0.8, min_value=0.1),
   batch_size=batch_size,
   game_steps_per_step=game_steps_per_step,
   copy_to_target_every=300,
