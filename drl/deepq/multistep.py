@@ -54,7 +54,8 @@ class MultiStepBuffer(ExperienceBuffer):
         exps.append(e._replace(
           reward=reward, state_after=exp.state_after, state_difference_in_steps=len(self.buffer) - t))
       self.buffer = deque()
-      return exps.reverse()  # just because it easier to debug
+      exps.reverse()  # just because it easier to debug
+      return exps
     elif len(self.buffer) >= self.n:
       reward = 0
       for t in range(self.n):
