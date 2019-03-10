@@ -226,5 +226,5 @@ def print_validation(model: LearningModel, episodes: int):
   for name, cnt in log.actions_taken.items():
     actions.append('%s: %.2f' % (name, cnt / log.steps))
 
-  print(' - validation %5.1f    (min: %4.0f, max %4.0f)\t%s' % (
-    log.episode_reward.mean, log.episode_reward.min, log.episode_reward.max, ",  ".join(actions)))
+  print(' - validation %5.1f    (min: %4.0f, max %4.0f)  %4d steps \t%s' % (
+    log.episode_reward.mean, log.episode_reward.min, log.episode_reward.max, log.steps, ",  ".join(actions)))
