@@ -29,7 +29,7 @@ class OpenAIGame(Game, ABC):
 
   def step(self, action: Action):
     old_state = self.frames.state()
-    env_state, reward, terminal, _ = self.env.step(action.key)
+    env_state, reward, terminal, info = self.env.step(action.key)
     frame = self._get_frame(env_state)
     self.frames.add_frame(frame)
     if terminal:
