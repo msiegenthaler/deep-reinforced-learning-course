@@ -31,7 +31,7 @@ def run_episode(model: ExecutionModel) -> (float, int, Dict[str, int]):
   :return: (total reward, number of steps taken, action map)
   """
   model.policy_net.eval()
-  state = model.game.reset()
+  state = model.game.reset().as_tensor()
   total_reward = 0
   steps = 0
   actions = {}
@@ -45,7 +45,7 @@ def run_episode(model: ExecutionModel) -> (float, int, Dict[str, int]):
     exp = model.game.step(action)
     steps += 1
     total_reward += exp.reward
-    state = exp.state_after
+    state = exp.state_after.as_tensor()
 
     if exp.done:
       break
@@ -93,21 +93,21 @@ def play_example(model: ExecutionModel, name='example', silent: bool = False) ->
   for a in model.game.actions:
     actions[a.name] = 0
   images = []
-  state = model.game.reset()
+  state = model.game.reset().as_tensor()
   while True:
     action_index = best_action(model.device, model.policy_net, state)
     action = model.game.actions[action_index]
     actions[action.name] += 1
 
     exp = model.game.step(action)
-    state = exp.state_after
+    state = exp.state_after.as_tensor()
     if not silent:
       print('- %4d  reward=%3.0f  action=%s' % (step, exp.reward, action.name))
     total_reward += exp.reward
 
     images.append({
       'step': step,
-      'image': exp.state_after[0],
+      'image': state[0],
       'action': action
     })
     step += 1

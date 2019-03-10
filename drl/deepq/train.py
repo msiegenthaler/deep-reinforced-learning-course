@@ -93,7 +93,7 @@ def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta
   episode_rewards = FloatStatCollector()
   total_loss = FloatStatCollector()
   experience_buffer = create_experience_buffer(hyperparams.multi_step_n, hyperparams.gamma)
-  state = model.game.reset()
+  state = model.game.reset().as_tensor()
   steps = math.ceil(hyperparams.game_steps_per_epoch // hyperparams.game_steps_per_step)
   episode_reward = 0
   episode_steps = 0
@@ -107,7 +107,7 @@ def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta
 
           with model.status.timings['game']:
             exp = model.game.step(model.game.actions[action_index])
-            state = exp.state_after
+            state = exp.state_after.as_tensor()
             episode_reward += exp.reward
             if exp.done:
               episode_rewards.record(episode_reward)
@@ -203,7 +203,7 @@ def log_training(model: LearningModel, epoch_log: EpochTrainingLog, avg_over_las
 def play_and_remember_steps(model: LearningModel, hyperparams: TrainingHyperparameters, batches: int = 10) -> None:
   exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
   steps = hyperparams.batch_size * batches
-  state = model.game.reset()
+  state = model.game.reset().as_tensor()
   experience_buffer = create_experience_buffer(hyperparams.multi_step_n, hyperparams.gamma)
   with model.status.timings['play']:
     for _ in range(steps):
@@ -211,7 +211,7 @@ def play_and_remember_steps(model: LearningModel, hyperparams: TrainingHyperpara
         action, best = chose_action(model, state, exploration_rate)
       with model.status.timings['game']:
         exp = model.game.step(model.game.actions[action])
-      state = exp.state_after
+      state = exp.state_after.as_tensor()
       with model.status.timings['remember']:
         for e in experience_buffer.process(exp, best):
           model.memory.remember(e)

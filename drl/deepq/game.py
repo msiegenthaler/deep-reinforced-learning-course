@@ -11,7 +11,10 @@ class Action(NamedTuple):
   index: int
 
 
-State = torch.Tensor
+class State(abc.ABC):
+  @abc.abstractmethod
+  def as_tensor(self) -> torch.Tensor:
+    pass
 
 
 class Experience(NamedTuple):
@@ -49,6 +52,16 @@ class Game(abc.ABC):
     pass
 
 
+class LazyFrameState(State):
+  """Much more memory efficient that stacking right on return, this way each frame is only held in memory once"""
+
+  def __init__(self, frames: [torch.Tensor]):
+    self._frames = frames
+
+  def as_tensor(self):
+    return torch.stack(self._frames)
+
+
 class Frames:
   """Holds a history of the t last frames and provides them as the state"""
 
@@ -63,5 +76,5 @@ class Frames:
   def add_frame(self, frame: torch.Tensor):
     self.deque.append(frame)
 
-  def state(self) -> torch.Tensor:
-    return torch.stack([t for t in self.deque])
+  def state(self) -> LazyFrameState:
+    return LazyFrameState([t for t in self.deque])

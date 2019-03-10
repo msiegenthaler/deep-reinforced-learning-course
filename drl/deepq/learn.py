@@ -11,7 +11,7 @@ def get_target_action_values(model: LearningModel, gamma: float, exps: [Experien
   :param gamma: discounting factor for future (next-step) rewards (e.g. 0.99)
   :param exps: Experiences to calculate target action values for
   """
-  next_states = torch.stack([e.state_after for e in exps if not e.done]).to(model.device)
+  next_states = torch.stack([e.state_after.as_tensor() for e in exps if not e.done]).to(model.device)
   non_final_mask = tensor(tuple(map(lambda e: not e.done, exps)), device=model.device, dtype=torch.uint8)
   next_state_values = torch.zeros(len(exps), device=model.device)
   next_state_values[non_final_mask] = model.target_net(next_states).max(1)[0].detach()
@@ -31,7 +31,7 @@ def calculate_losses(model: LearningModel, gamma: float, exps: [Experience]) -> 
   """
   target_action_values = get_target_action_values(model, gamma, exps).detach()
 
-  states = torch.stack([e.state_before for e in exps])
+  states = torch.stack([e.state_before.as_tensor() for e in exps])
   states = states.to(model.device)
   actions = torch.stack([tensor([e.action.index]) for e in exps])
   actions = actions.to(model.device)
