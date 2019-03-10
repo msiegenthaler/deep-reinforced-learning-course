@@ -1,7 +1,8 @@
-from drl.deepq.game import Action
-from drl.openai.atari_wrappers import MaxAndSkipEnv
-from drl.openai.game_openai import OpenAIGame
 import torchvision.transforms as T
+
+from drl.deepq.game import Action
+from drl.openai.atari_wrappers import NoopResetEnv, FireResetEnv
+from drl.openai.game_openai import OpenAIGame
 
 
 class Pong(OpenAIGame):
@@ -11,7 +12,7 @@ class Pong(OpenAIGame):
   def __init__(self, x: int, y: int, t: int):
     self.transform = T.Compose([T.ToPILImage(), T.Resize((y, x)), T.Grayscale(), T.ToTensor()])
     super().__init__('Pong-v0', t)
-    self.env = MaxAndSkipEnv(self.env)
+    self.env = NoopResetEnv(FireResetEnv(self.env))
 
   @property
   def name(self) -> str:
