@@ -29,9 +29,17 @@ class EpochTrainingLog(NamedTuple):
   duration_seconds: float
 
 
+class EpisodeLog(NamedTuple):
+  at_training_epoch: int
+  reward: float
+  steps: int
+  exploration_rate: float
+
+
 class TrainingStatus:
   def __init__(self):
     self.training_log: [EpochTrainingLog] = []
+    self.training_episodes: [EpisodeLog] = []
     self.validation_log: [ValidationLog] = []
     self.timings = Timings()
 
@@ -45,7 +53,7 @@ class TrainingStatus:
 
   @property
   def trained_for_episodes(self) -> int:
-    return sum([l.episodes for l in self.training_log])
+    return len(self.training_episodes)
 
 
 class ExecutionModel(NamedTuple):

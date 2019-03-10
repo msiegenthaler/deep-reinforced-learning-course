@@ -3,12 +3,13 @@ import random
 from time import time
 from typing import NamedTuple, Callable
 
+import numpy as np
 from torch import Tensor
 
 from drl.deepq.checkpoint import save_checkpoint
 from drl.deepq.execution import best_action, run_validation, play_example
 from drl.deepq.learn import learn_from_memory
-from drl.deepq.model import LearningModel, EpochTrainingLog
+from drl.deepq.model import LearningModel, EpochTrainingLog, EpisodeLog
 from drl.deepq.multistep import create_experience_buffer
 from drl.utils.stats import FloatStatCollector
 
@@ -95,10 +96,12 @@ def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta
   state = model.game.reset()
   steps = math.ceil(hyperparams.game_steps_per_epoch // hyperparams.game_steps_per_step)
   episode_reward = 0
+  episode_steps = 0
   with model.status.timings['epoch']:
     for step in range(steps):
       with model.status.timings['play']:
         for _ in range(hyperparams.game_steps_per_step):
+          episode_steps += 1
           with model.status.timings['forward action']:
             action_index, best = chose_action(model, state, exploration_rate)
 
@@ -108,7 +111,14 @@ def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta
             episode_reward += exp.reward
             if exp.done:
               episode_rewards.record(episode_reward)
+              model.status.training_episodes.append(EpisodeLog(
+                at_training_epoch=model.status.trained_for_epochs + 1,
+                reward=episode_reward,
+                steps=episode_steps,
+                exploration_rate=exploration_rate
+              ))
               episode_reward = 0
+              episode_steps = 0
 
           with model.status.timings['remember']:
             for e in experience_buffer.process(exp, best):
@@ -138,7 +148,7 @@ def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta
 
 
 def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epochs,
-          save_every=10, example_every=10, validation_episodes=10) -> None:
+          save_every=10, example_every=10, validation_episodes=10, avg_over_last_episodes=100) -> None:
   """
   Train the model to get better at the game
   :param model:
@@ -154,13 +164,14 @@ def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epoc
                                                                              hyperparams.batch_size))
 
   for epoch in range(train_epochs):
+    print('Epoch: %3d' % (model.status.trained_for_epochs + 1))
     exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
     beta = hyperparams.beta(model.status.trained_for_epochs)
 
     epoch_log = train_epoch(model, hyperparams, beta, exploration_rate)
 
     model.status.training_log.append(epoch_log)
-    log_training(model, epoch_log)
+    log_training(model, epoch_log, avg_over_last_episodes)
 
     if validation_episodes > 0:
       print_validation(model, validation_episodes)
@@ -175,24 +186,18 @@ def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epoc
   print('Done training for %d epochs' % train_epochs)
 
 
-def log_training(model: LearningModel, epoch_log: EpochTrainingLog) -> None:
+def log_training(model: LearningModel, epoch_log: EpochTrainingLog, avg_over_last_episodes=100) -> None:
   if epoch_log.episodes != 0:
-    print(
-      ('Epoch %3d: %2d eps.\texpl: %4.2f beta %4.2f\trewards: %4.0f (%4.0f to %4.0f)' +
-       '\tloss: %4.2f\t%4.1f step/s (%d steps, %d episodes)') %
-      (model.status.trained_for_epochs, epoch_log.episodes,
-       epoch_log.parameter_values['exploration_rate'], epoch_log.parameter_values['beta'],
-       epoch_log.episode_reward.mean, epoch_log.episode_reward.min, epoch_log.episode_reward.max,
-       epoch_log.loss.mean,
-       epoch_log.game_steps / epoch_log.duration_seconds,
-       model.status.trained_for_steps, model.status.trained_for_episodes))
+    avg: float = np.mean([episode.reward for episode in model.status.training_episodes[-avg_over_last_episodes:]])
+    print(' - completed %3d episodes, reward: %5.1f (%4.0f to %4.0f)  => %6.2f over last %d of %d episodes' % (
+      epoch_log.episodes,
+      epoch_log.episode_reward.mean, epoch_log.episode_reward.min, epoch_log.episode_reward.max,
+      avg, avg_over_last_episodes, model.status.trained_for_episodes))
   else:
-    print('Epoch %3d:  0 eps.\texpl: %.2f  beta %.2f\tloss: %.2f\t%4.1f step/s (%d steps, %d episodes)' %
-          (model.status.trained_for_epochs,
-           epoch_log.parameter_values['exploration_rate'], epoch_log.parameter_values['beta'],
-           epoch_log.loss.mean,
-           epoch_log.game_steps / epoch_log.duration_seconds,
-           model.status.trained_for_steps, model.status.trained_for_episodes))
+    print(' - completed   0 episodes in %6d frames' % epoch_log.game_steps)
+  print(' - expl: %4.2f beta %4.2f    loss: %4.2f    %4.1f step/s    %d steps total' % (
+    epoch_log.parameter_values['exploration_rate'], epoch_log.parameter_values['beta'],
+    epoch_log.loss.mean, epoch_log.game_steps / epoch_log.duration_seconds, model.status.trained_for_steps))
 
 
 def play_and_remember_steps(model: LearningModel, hyperparams: TrainingHyperparameters, batches: int = 10) -> None:
@@ -220,5 +225,5 @@ def print_validation(model: LearningModel, episodes: int):
   for name, cnt in log.actions_taken.items():
     actions.append('%s: %.2f' % (name, cnt / log.steps))
 
-  print(' - validation %4.0f    (min: %4.0f, max %4.0f)\t%s' % (
+  print(' - validation %5.1f    (min: %4.0f, max %4.0f)\t%s' % (
     log.episode_reward.mean, log.episode_reward.min, log.episode_reward.max, ",  ".join(actions)))
