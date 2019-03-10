@@ -195,9 +195,10 @@ def log_training(model: LearningModel, epoch_log: EpochTrainingLog, avg_over_las
       avg, avg_over_last_episodes, model.status.trained_for_episodes))
   else:
     print(' - completed   0 episodes in %6d frames' % epoch_log.game_steps)
-  print(' - expl: %4.2f beta %4.2f    loss: %4.2f    %4.1f step/s    %d steps total' % (
+  print(' - expl: %4.2f beta %4.2f    loss: %4.2f    %4.1f step/s (%4.0fs)   %6d steps total' % (
     epoch_log.parameter_values['exploration_rate'], epoch_log.parameter_values['beta'],
-    epoch_log.loss.mean, epoch_log.game_steps / epoch_log.duration_seconds, model.status.trained_for_steps))
+    epoch_log.loss.mean, epoch_log.game_steps / epoch_log.duration_seconds, epoch_log.duration_seconds,
+    model.status.trained_for_steps))
 
 
 def play_and_remember_steps(model: LearningModel, hyperparams: TrainingHyperparameters, batches: int = 10) -> None:
