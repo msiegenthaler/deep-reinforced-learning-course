@@ -79,5 +79,6 @@ class LearningModel(NamedTuple):
       policy_net=self.policy_net,
       device=self.device,
       strategy_name=self.strategy_name,
+      game_name=self.game_name,
       trained_for_epochs=self.status.trained_for_epochs
     )
