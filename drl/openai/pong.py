@@ -5,7 +5,7 @@ import torch
 import torchvision.transforms as T
 
 from drl.deepq.game import Action
-from drl.openai.atari_wrappers import EpisodicLifeEnv, NoopResetEnv, MaxAndSkipEnv, FireResetEnv, ClipRewardEnv
+from drl.openai.atari_wrappers import NoopResetEnv, MaxAndSkipEnv, FireResetEnv, ClipRewardEnv
 from drl.openai.game_openai import OpenAIGame
 
 
@@ -17,7 +17,6 @@ class Pong(OpenAIGame):
     self.transform = T.Compose([T.ToPILImage(), T.Resize((y, x)), T.Grayscale(), T.ToTensor()])
     super().__init__('PongNoFrameskip-v4', t)
     self.env = MaxAndSkipEnv(self.env, skip=skip)
-    self.env = EpisodicLifeEnv(NoopResetEnv(FireResetEnv(self.env)))
 
   @property
   def name(self) -> str:
@@ -36,7 +35,6 @@ class Pong30Min(OpenAIGame):
   def __init__(self, x: int, y: int):
     super().__init__('PongNoFrameskip-v4', 4)
     env = self.env
-    # env = EpisodicLifeEnv(env)
     env = NoopResetEnv(env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=4)
     if 'FIRE' in env.unwrapped.get_action_meanings():
