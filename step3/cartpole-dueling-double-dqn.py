@@ -2,22 +2,23 @@
 import torch
 from torch.optim import RMSprop
 
+from drl.deepq.execution import play_example
 from drl.deepq.model import LearningModel
 from drl.deepq.networks import DuelingDQN
 from drl.deepq.replay_memory import PrioritizedReplayMemory
 from drl.deepq.train import TrainingHyperparameters, pretrain, linear_increase, linear_decay, \
-  play_and_remember_steps
-from drl.deepq.checkpoint import load_checkpoint
+  play_and_remember_steps, train
+from drl.deepq.checkpoint import load_checkpoint, save_checkpoint
 from drl.openai.cartpole import CartPoleVisual
 
 game_steps_per_step = 2
-batch_per_game_step = 128
+batch_per_game_step = 64
 batch_size = game_steps_per_step * batch_per_game_step
 
 w = 128
 h = 64
 t = 4
-memory_size = 1000000
+memory_size = 10000
 
 hyperparams = TrainingHyperparameters(
   gamma=1,
@@ -56,7 +57,8 @@ else:
   print('Pretraining finished')
 
 # %%
-#train(model, hyperparams, 10)
+train(model, hyperparams, 10)
+save_checkpoint(model)
 
 # %%
-#play_example(model)
+play_example(model.exec())
