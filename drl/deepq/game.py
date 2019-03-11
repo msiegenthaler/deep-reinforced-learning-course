@@ -1,6 +1,6 @@
 import abc
 from collections import deque
-from typing import NamedTuple
+from typing import NamedTuple, Callable
 
 import torch
 
@@ -41,6 +41,10 @@ class Game(abc.ABC):
   def reset(self) -> State:
     pass
 
+  @abc.abstractmethod
+  def close(self) -> None:
+    pass
+
   @property
   @abc.abstractmethod
   def actions(self) -> [Action]:
@@ -50,6 +54,16 @@ class Game(abc.ABC):
   @abc.abstractmethod
   def name(self) -> str:
     pass
+
+  def __enter__(self):
+    self.reset()
+    return self
+
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    self.close()
+
+
+GameFactory = Callable[[], Game]
 
 
 class LazyFrameState(State):

@@ -43,6 +43,9 @@ class OpenAIGame(Game, ABC):
   def current_state(self) -> State:
     return self.frames.state()
 
+  def close(self):
+    self.env.close()
+
 
 class OpenAIFrameGame(OpenAIGame, ABC):
   """OpenAI Gym game where we just look at the rendered output, not at the state"""

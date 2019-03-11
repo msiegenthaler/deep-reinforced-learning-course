@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch import nn, Tensor
 
+from drl.deepq.game import Game
 from drl.deepq.model import ExecutionModel, ValidationLog
 from drl.utils.stats import FloatStatCollector
 
@@ -24,25 +25,24 @@ def best_action(device, policy_net: nn.Module, state: Tensor) -> int:
     return index
 
 
-def run_episode(model: ExecutionModel) -> (float, int, Dict[str, int]):
+def run_episode(model: ExecutionModel, game: Game) -> (float, int, Dict[str, int]):
   """
   Run a single episode (mostly until you died).
-  :param model: the model to execute
   :return: (total reward, number of steps taken, action map)
   """
   model.policy_net.eval()
-  state = model.game.reset().as_tensor()
+  state = game.reset().as_tensor()
   total_reward = 0
   steps = 0
   actions = {}
-  for a in model.game.actions:
+  for a in game.actions:
     actions[a.name] = 0
   while True:
     action_index = best_action(model.device, model.policy_net, state)
-    action = model.game.actions[action_index]
+    action = game.actions[action_index]
     actions[action.name] += 1
 
-    exp = model.game.step(action)
+    exp = game.step(action)
     steps += 1
     total_reward += exp.reward
     state = exp.state_after.as_tensor()
@@ -52,28 +52,26 @@ def run_episode(model: ExecutionModel) -> (float, int, Dict[str, int]):
   return total_reward, steps, actions
 
 
-def run_validation(model: ExecutionModel, count: int) -> ValidationLog:
+def run_validation(model: ExecutionModel, game: Game, episodes_to_play: int) -> ValidationLog:
   """
   Run multiple episodes to verify the performance
-  :param model: the model to execute
-  :param count: number of episodes to execute
   :return: (average rewards, array of episode rewards, total number of steps, action map)
   """
   actions = {}
-  for a in model.game.actions:
+  for a in game.actions:
     actions[a.name] = 0
   t0 = time()
   rewards = FloatStatCollector()
   steps = 0
-  for _ in range(count):
-    reward, s, episode_actions = run_episode(model)
+  for _ in range(episodes_to_play):
+    reward, s, episode_actions = run_episode(model, game)
     for name, c in episode_actions.items():
       actions[name] += c
     rewards.record(reward)
     steps += s
   return ValidationLog(
     at_training_epoch=model.trained_for_epochs,
-    episodes=count,
+    episodes=episodes_to_play,
     steps=steps,
     duration_seconds=time() - t0,
     episode_reward=rewards.get(),
@@ -81,7 +79,7 @@ def run_validation(model: ExecutionModel, count: int) -> ValidationLog:
   )
 
 
-def play_example(model: ExecutionModel, name='example', silent: bool = False) -> (str, int, float):
+def play_example(model: ExecutionModel, game: Game, name='example', silent: bool = False) -> (str, int, float):
   """
   Plays an episode of the game and saves a video of it.
   :returns the name of the video file
@@ -90,16 +88,16 @@ def play_example(model: ExecutionModel, name='example', silent: bool = False) ->
   step = 0
   total_reward = 0
   actions = {}
-  for a in model.game.actions:
+  for a in game.actions:
     actions[a.name] = 0
   images = []
-  state = model.game.reset().as_tensor()
+  state = game.reset().as_tensor()
   while True:
     action_index = best_action(model.device, model.policy_net, state)
-    action = model.game.actions[action_index]
+    action = game.actions[action_index]
     actions[action.name] += 1
 
-    exp = model.game.step(action)
+    exp = game.step(action)
     state = exp.state_after.as_tensor()
     if not silent:
       print('- %4d  reward=%3.0f  action=%s' % (step, exp.reward, action.name))
@@ -122,7 +120,7 @@ def play_example(model: ExecutionModel, name='example', silent: bool = False) ->
     plt.title('%s (%d -> %.0f)' % (name, len(images), total_reward))
     movie_frames.append([plt.imshow(f['image'], animated=True)])
   ani = animation.ArtistAnimation(fig, movie_frames, interval=40, blit=True, repeat=False)
-  movie_name = 'videos/%s-%s-%s.mp4' % (model.game.name, model.strategy_name, name)
+  movie_name = 'videos/%s-%s-%s.mp4' % (game.name, model.strategy_name, name)
   ani.save(movie_name)
   if not silent:
     plt.show()

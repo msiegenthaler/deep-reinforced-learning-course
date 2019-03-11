@@ -8,6 +8,7 @@ from torch import Tensor
 
 from drl.deepq.checkpoint import save_checkpoint
 from drl.deepq.execution import best_action, run_validation, play_example
+from drl.deepq.game import Game, GameFactory
 from drl.deepq.learn import learn_from_memory
 from drl.deepq.model import LearningModel, EpochTrainingLog, EpisodeLog
 from drl.deepq.multistep import create_experience_buffer
@@ -47,33 +48,51 @@ class TrainingHyperparameters(NamedTuple):
   # Game steps (actions) per training epoch
   game_steps_per_epoch: int = 1000
 
+  # Number of steps to have in the memory before beginning with training
+  init_memory_steps: int = 1000
 
-def prefill_memory(model: LearningModel, n):
+  # number of 'warmup' rounds (to avoid NaN/infinite loss)
+  warmup_rounds: int = 0
+
+
+def _prefill_memory_random(model: LearningModel, game: Game, n: int):
   """Fill the memory with n experiences"""
-  model.game.reset()
+  game.reset()
   for i in range(n):
-    action = random.randrange(len(model.game.actions))
-    exp = model.game.step(model.game.actions[action])
+    action = random.randrange(len(game.actions))
+    exp = game.step(game.actions[action])
     model.memory.remember(exp)
+  game.close()
 
 
-def warm_up(model: LearningModel, rounds: int = 100) -> None:
+def _play_and_remember_steps(model: LearningModel, game: Game, hyperparams: TrainingHyperparameters, steps: int):
+  exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
+  state = game.reset().as_tensor()
+  experience_buffer = create_experience_buffer(hyperparams.multi_step_n, hyperparams.gamma)
+  with model.status.timings['play']:
+    for _ in range(steps):
+      with model.status.timings['forward action']:
+        action, best = chose_action(model, state, exploration_rate)
+      with model.status.timings['game']:
+        exp = game.step(game.actions[action])
+      state = exp.state_after.as_tensor()
+      with model.status.timings['remember']:
+        for e in experience_buffer.process(exp, best):
+          model.memory.remember(e)
+
+
+def _warm_up(model: LearningModel, params: TrainingHyperparameters) -> None:
   """
   Warm up the training model to prevent NaN losses and such bad things
   """
-  for r in range(rounds):
-    loss = learn_from_memory(model, 8, 0.9, 1.0)
+  for r in range(params.warmup_rounds//2):
+    loss = learn_from_memory(model, 8, params.gamma, params.beta(0))
     if math.isnan(loss) or math.isinf(loss):
       raise ValueError('infinite loss after part 1 round %d' % r)
-  for r in range(rounds):
-    loss = learn_from_memory(model, 16, 0.9, 1.0)
+  for r in range(params.warmup_rounds//2):
+    loss = learn_from_memory(model, 16, params.gamma, params.beta(0))
     if math.isnan(loss) or math.isinf(loss):
       raise ValueError('infinite loss after part 2 round %d' % r)
-
-
-def pretrain(model: LearningModel, hyperparams: TrainingHyperparameters, warm_up_iterations=500) -> None:
-  prefill_memory(model, hyperparams.batch_size)
-  warm_up(model, warm_up_iterations)
 
 
 def chose_action(model: LearningModel, state: Tensor, exploration_rate: float) -> (int, bool):
@@ -86,17 +105,15 @@ def chose_action(model: LearningModel, state: Tensor, exploration_rate: float) -
   return action, True
 
 
-def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta: float,
-                exploration_rate: float) -> EpochTrainingLog:
+def train_epoch(model: LearningModel, game: Game, hyperparams: TrainingHyperparameters, beta: float,
+                exploration_rate: float, episode_reward=0., episode_steps=0) -> (EpochTrainingLog, int, float):
   model.policy_net.train()
   t0 = time()
   episode_rewards = FloatStatCollector()
   total_loss = FloatStatCollector()
   experience_buffer = create_experience_buffer(hyperparams.multi_step_n, hyperparams.gamma)
-  state = model.game.reset().as_tensor()
+  state = game.current_state().as_tensor()
   steps = math.ceil(hyperparams.game_steps_per_epoch // hyperparams.game_steps_per_step)
-  episode_reward = 0
-  episode_steps = 0
   with model.status.timings['epoch']:
     for step in range(steps):
       with model.status.timings['play']:
@@ -106,7 +123,7 @@ def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta
             action_index, best = chose_action(model, state, exploration_rate)
 
           with model.status.timings['game']:
-            exp = model.game.step(model.game.actions[action_index])
+            exp = game.step(game.actions[action_index])
             state = exp.state_after.as_tensor()
             episode_reward += exp.reward
             if exp.done:
@@ -144,45 +161,67 @@ def train_epoch(model: LearningModel, hyperparams: TrainingHyperparameters, beta
     loss=total_loss.get(),
     episode_reward=er,
     duration_seconds=time() - t0
-  )
+  ), episode_reward, episode_steps
 
 
-def train(model: LearningModel, hyperparams: TrainingHyperparameters, train_epochs,
-          save_every=10, example_every=10, validation_episodes=10, avg_over_last_episodes=100) -> None:
+def train(model: LearningModel, game_factory: GameFactory, hyperparams: TrainingHyperparameters, train_epochs,
+          save_every=10, example_every=0, validation_episodes=0, avg_over_last_episodes=100) -> None:
   """
   Train the model to get better at the game
-  :param model:
+  :param model: the model to train
+  :param game_factory: creates instances of the game to play
   :param hyperparams: exploration_rate and beta will be calculated by this method
   :param train_epochs: how many epochs to train for
   :param save_every: save the model state every x epochs
   :param example_every: saves an example gameplay every x epochs
   :param validation_episodes: validation after each epoch for that many episodes
+  :param avg_over_last_episodes: Length of running average window (for logging)
   :return: None
   """
   print('Starting training for %d epochs a %d steps (with batch_size %d)' % (train_epochs,
                                                                              hyperparams.game_steps_per_epoch,
                                                                              hyperparams.batch_size))
 
+  validation_game = game_factory()
+  train_game = game_factory()
+  if model.memory.size() < hyperparams.init_memory_steps:
+    print('- Prefilling memory with %d steps' % hyperparams.init_memory_steps)
+    if model.status.trained_for_epochs == 0:
+      _prefill_memory_random(model, train_game, hyperparams.init_memory_steps)
+      if hyperparams.warmup_rounds > 0:
+        print('- warming up the model')
+        _warm_up(model, hyperparams)
+    else:
+      _play_and_remember_steps(model, train_game, hyperparams, hyperparams.init_memory_steps)
+
+  train_episode_steps = 0
+  train_episode_reward = 0
+  train_game.reset()
   for epoch in range(train_epochs):
     print('Epoch: %3d' % (model.status.trained_for_epochs + 1))
     exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
     beta = hyperparams.beta(model.status.trained_for_epochs)
 
-    epoch_log = train_epoch(model, hyperparams, beta, exploration_rate)
+    epoch_log, train_episode_reward, train_episode_steps = train_epoch(model, train_game,
+                                                                       hyperparams, beta, exploration_rate,
+                                                                       train_episode_reward, train_episode_steps)
 
     model.status.training_log.append(epoch_log)
     log_training(model, epoch_log, avg_over_last_episodes)
 
     if validation_episodes > 0:
-      print_validation(model, validation_episodes)
+      print_validation(model, validation_game, validation_episodes)
 
     if save_every != 0 and model.status.trained_for_epochs % save_every == 0:
       save_checkpoint(model)
 
     if example_every != 0 and model.status.trained_for_epochs % example_every == 0:
-      video, v_s, v_r = play_example(model.exec(), 'epoch%04d' % model.status.trained_for_epochs, silent=True)
+      video, v_s, v_r = play_example(model.exec(), validation_game, 'epoch%04d' % model.status.trained_for_epochs,
+                                     silent=True)
       print(' - saved example gameplay video to %s (reward: %.0f, steps: %d)' % (video, v_r, v_s))
 
+  train_game.close()
+  validation_game.close()
   print('Done training for %d epochs' % train_epochs)
 
 
@@ -201,25 +240,8 @@ def log_training(model: LearningModel, epoch_log: EpochTrainingLog, avg_over_las
     model.status.trained_for_steps))
 
 
-def play_and_remember_steps(model: LearningModel, hyperparams: TrainingHyperparameters, batches: int = 10) -> None:
-  exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
-  steps = hyperparams.batch_size * batches
-  state = model.game.reset().as_tensor()
-  experience_buffer = create_experience_buffer(hyperparams.multi_step_n, hyperparams.gamma)
-  with model.status.timings['play']:
-    for _ in range(steps):
-      with model.status.timings['forward action']:
-        action, best = chose_action(model, state, exploration_rate)
-      with model.status.timings['game']:
-        exp = model.game.step(model.game.actions[action])
-      state = exp.state_after.as_tensor()
-      with model.status.timings['remember']:
-        for e in experience_buffer.process(exp, best):
-          model.memory.remember(e)
-
-
-def print_validation(model: LearningModel, episodes: int):
-  log = run_validation(model.exec(), episodes)
+def print_validation(model: LearningModel, game: Game, episodes: int):
+  log = run_validation(model.exec(), game, episodes)
   model.status.validation_log.append(log)
 
   actions = []

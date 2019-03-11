@@ -3,7 +3,6 @@ from typing import NamedTuple, Dict
 from torch import nn
 from torch.optim import Optimizer
 
-from drl.deepq.game import Game
 from drl.deepq.replay_memory import ReplayMemory
 from drl.utils.stats import FloatStat
 from drl.utils.timings import Timings
@@ -58,8 +57,8 @@ class TrainingStatus:
 
 class ExecutionModel(NamedTuple):
   policy_net: nn.Module
-  game: Game
   device: object
+  game_name: str
   strategy_name: str
   trained_for_epochs: int
 
@@ -68,16 +67,15 @@ class LearningModel(NamedTuple):
   policy_net: nn.Module
   target_net: nn.Module  # for double dq
   optimizer: Optimizer
-  game: Game
   memory: ReplayMemory
   device: object  # Device to train on
+  game_name: str
   strategy_name: str
   status: TrainingStatus = TrainingStatus()
 
   def exec(self):
     return ExecutionModel(
       policy_net=self.policy_net,
-      game=self.game,
       device=self.device,
       strategy_name=self.strategy_name,
       trained_for_epochs=self.status.trained_for_epochs

@@ -45,6 +45,9 @@ class VizdoomGame(Game, ABC):
     self._new_episode()
     return self.frames.state()
 
+  def close(self):
+    self.game.close()
+
   def _new_episode(self):
     self.game.new_episode()
     frame = self._get_frame()
