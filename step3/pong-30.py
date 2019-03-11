@@ -64,4 +64,4 @@ train(model, create_game, hyperparams, 500000 // hyperparams.game_steps_per_epoc
 save_checkpoint(model)
 
 with create_game() as game:
-  print_validation(model, game, 1)
+  print_validation(model, game, 20)
