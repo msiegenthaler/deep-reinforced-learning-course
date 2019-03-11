@@ -165,7 +165,7 @@ def train_epoch(model: LearningModel, game: Game, hyperparams: TrainingHyperpara
 
 
 def train(model: LearningModel, game_factory: GameFactory, hyperparams: TrainingHyperparameters, train_epochs,
-          save_every=10, example_every=0, validation_episodes=0, avg_over_last_episodes=100) -> None:
+          save_every=10, example_every=0, validation_episodes=0) -> None:
   """
   Train the model to get better at the game
   :param model: the model to train
@@ -207,7 +207,7 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
                                                                        train_episode_reward, train_episode_steps)
 
     model.status.training_log.append(epoch_log)
-    log_training(model, epoch_log, avg_over_last_episodes)
+    log_training(model, epoch_log)
 
     if validation_episodes > 0:
       print_validation(model, validation_game, validation_episodes)
@@ -225,13 +225,16 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
   print('Done training for %d epochs' % train_epochs)
 
 
-def log_training(model: LearningModel, epoch_log: EpochTrainingLog, avg_over_last_episodes=100) -> None:
+def log_training(model: LearningModel, epoch_log: EpochTrainingLog) -> None:
+  def avg_over(n: int) -> float:
+    return np.mean([episode.reward for episode in model.status.training_episodes[-n:]])
+  avgs = [5, 10, 25, 50, 100]
   if epoch_log.episodes != 0:
-    avg: float = np.mean([episode.reward for episode in model.status.training_episodes[-avg_over_last_episodes:]])
-    print(' - completed %3d episodes, reward: %5.1f (%4.0f to %4.0f)  => %6.2f over last %d of %d episodes' % (
+    avgs_over = ['%6.2f (%d)' % (avg_over(n), n) for n in avgs]
+    print(' - completed %3d episodes, reward: %5.1f (%4.0f to %4.0f)  => total %d episodes: %s' % (
       epoch_log.episodes,
       epoch_log.episode_reward.mean, epoch_log.episode_reward.min, epoch_log.episode_reward.max,
-      avg, avg_over_last_episodes, model.status.trained_for_episodes))
+      model.status.trained_for_episodes, ', '.join(avgs_over)))
   else:
     print(' - completed   0 episodes in %6d frames' % epoch_log.game_steps)
   print(' - expl: %4.2f beta %4.2f    loss: %4.2f    %4.1f step/s (%4.0fs)   %6d steps total' % (
