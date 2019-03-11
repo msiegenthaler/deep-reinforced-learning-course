@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+import numpy as np
 
 def conv2d_size_out(size, kernel_size=4, stride=2):
   return (size - (kernel_size - 1) - 1) // stride + 1
@@ -28,17 +28,17 @@ class DQN(nn.Module):
       nn.ReLU()
     )
 
-    conv_out_w = conv2d_size_out(
-      conv2d_size_out(conv2d_size_out(w, kernel_size=8)))
-    conv_out_h = conv2d_size_out(
-      conv2d_size_out(conv2d_size_out(h, kernel_size=8)))
-    linear_in = conv_out_w * conv_out_h * 128
+    linear_in = self._get_conv_out([t, h, w])
 
     self.action_count = action_count
     self.linear = nn.Sequential(
       nn.Linear(linear_in, 512),
       nn.ReLU(),
       nn.Linear(512, action_count))
+
+  def _get_conv_out(self, shape):
+    o = self.conv(torch.zeros(1, *shape))
+    return int(np.prod(o.size()))
 
   def forward(self, state):
     r = self.conv(state)
@@ -69,12 +69,7 @@ class DuelingDQN(nn.Module):
       nn.ReLU()
     )
 
-    conv_out_w = conv2d_size_out(
-      conv2d_size_out(conv2d_size_out(w, kernel_size=8)))
-    conv_out_h = conv2d_size_out(
-      conv2d_size_out(conv2d_size_out(h, kernel_size=8)))
-    linear_in = conv_out_w * conv_out_h * 128
-
+    linear_in = self._get_conv_out([t, h, w])
     self.action_count = action_count
 
     self.state_value_linear = nn.Sequential(
@@ -87,6 +82,10 @@ class DuelingDQN(nn.Module):
       nn.ReLU(),
       nn.Linear(512, action_count)
     )
+
+  def _get_conv_out(self, shape):
+    o = self.conv(torch.zeros(1, *shape))
+    return int(np.prod(o.size()))
 
   def forward(self, state):
     r = self.conv(state)
