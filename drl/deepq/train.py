@@ -183,20 +183,21 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
                                                                              hyperparams.game_steps_per_epoch,
                                                                              hyperparams.batch_size))
 
-  validation_game = game_factory()
-  train_game = game_factory()
   if model.memory.size() < hyperparams.init_memory_steps:
     print('- Prefilling memory with %d steps' % hyperparams.init_memory_steps)
-    if model.status.trained_for_epochs == 0:
-      _prefill_memory_random(model, train_game, hyperparams.init_memory_steps)
-      if hyperparams.warmup_rounds > 0:
-        print('- warming up the model')
-        _warm_up(model, hyperparams)
-    else:
-      _play_and_remember_steps(model, train_game, hyperparams, hyperparams.init_memory_steps)
+    with game_factory() as game:
+      if model.status.trained_for_epochs == 0:
+        _prefill_memory_random(model, game, hyperparams.init_memory_steps)
+        if hyperparams.warmup_rounds > 0:
+          print('- warming up the model')
+          _warm_up(model, hyperparams)
+      else:
+        _play_and_remember_steps(model, game, hyperparams, hyperparams.init_memory_steps)
 
   train_episode_steps = 0
   train_episode_reward = 0
+  validation_game = game_factory()
+  train_game = game_factory()
   train_game.reset()
   for epoch in range(train_epochs):
     print('Epoch: %3d' % (model.status.trained_for_epochs + 1))
