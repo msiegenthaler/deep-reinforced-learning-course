@@ -130,6 +130,7 @@ def train_epoch(model: LearningModel, game: Game, hyperparams: TrainingHyperpara
               episode_rewards.record(episode_reward)
               model.status.training_episodes.append(EpisodeLog(
                 at_training_epoch=model.status.trained_for_epochs + 1,
+                at_training_step=model.status.trained_for_steps + step,
                 reward=episode_reward,
                 steps=episode_steps,
                 exploration_rate=exploration_rate

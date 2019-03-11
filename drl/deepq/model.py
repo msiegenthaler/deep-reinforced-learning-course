@@ -30,6 +30,7 @@ class EpochTrainingLog(NamedTuple):
 
 class EpisodeLog(NamedTuple):
   at_training_epoch: int
+  at_training_step: int
   reward: float
   steps: int
   exploration_rate: float
