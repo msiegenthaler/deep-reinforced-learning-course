@@ -58,7 +58,7 @@ class TrainingStatus:
 
 class ExecutionModel(NamedTuple):
   policy_net: nn.Module
-  device: object
+  device: str
   game_name: str
   strategy_name: str
   trained_for_epochs: int
@@ -69,7 +69,7 @@ class LearningModel(NamedTuple):
   target_net: nn.Module  # for double dq
   optimizer: Optimizer
   memory: ReplayMemory
-  device: object  # Device to train on
+  device: str  # Device to train on
   game_name: str
   strategy_name: str
   status: TrainingStatus = TrainingStatus()
