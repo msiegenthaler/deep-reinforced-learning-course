@@ -85,11 +85,11 @@ def _warm_up(model: LearningModel, params: TrainingHyperparameters) -> None:
   """
   Warm up the training model to prevent NaN losses and such bad things
   """
-  for r in range(params.warmup_rounds//2):
+  for r in range(params.warmup_rounds // 2):
     loss = learn_from_memory(model, 8, params.gamma, params.beta(0))
     if math.isnan(loss) or math.isinf(loss):
       raise ValueError('infinite loss after part 1 round %d' % r)
-  for r in range(params.warmup_rounds//2):
+  for r in range(params.warmup_rounds // 2):
     loss = learn_from_memory(model, 16, params.gamma, params.beta(0))
     if math.isnan(loss) or math.isinf(loss):
       raise ValueError('infinite loss after part 2 round %d' % r)
@@ -105,8 +105,25 @@ def chose_action(model: LearningModel, state: Tensor, exploration_rate: float) -
   return action, True
 
 
+class EpisodeTracker:
+  def __init__(self):
+    self.steps = 0
+    self.reward = 0.
+
+  def track(self, step_reward: float) -> None:
+    self.steps += 1
+    self.reward += step_reward
+
+  def episode_done(self) -> (int, float):
+    steps = self.steps
+    reward = self.reward
+    self.steps = 0
+    self.reward = 0.
+    return steps, reward
+
+
 def train_epoch(model: LearningModel, game: Game, hyperparams: TrainingHyperparameters, beta: float,
-                exploration_rate: float, episode_reward=0., episode_steps=0) -> (EpochTrainingLog, int, float):
+                exploration_rate: float, episode_tracker: EpisodeTracker) -> EpochTrainingLog:
   model.policy_net.train()
   t0 = time()
   episode_rewards = FloatStatCollector()
@@ -118,15 +135,15 @@ def train_epoch(model: LearningModel, game: Game, hyperparams: TrainingHyperpara
     for step in range(steps):
       with model.status.timings['play']:
         for _ in range(hyperparams.game_steps_per_step):
-          episode_steps += 1
           with model.status.timings['forward action']:
             action_index, best = chose_action(model, state, exploration_rate)
 
           with model.status.timings['game']:
             exp = game.step(game.actions[action_index])
             state = exp.state_after.as_tensor()
-            episode_reward += exp.reward
+            episode_tracker.track(exp.reward)
             if exp.done:
+              episode_steps, episode_reward = episode_tracker.episode_done()
               episode_rewards.record(episode_reward)
               model.status.training_episodes.append(EpisodeLog(
                 at_training_epoch=model.status.trained_for_epochs + 1,
@@ -135,8 +152,6 @@ def train_epoch(model: LearningModel, game: Game, hyperparams: TrainingHyperpara
                 steps=episode_steps,
                 exploration_rate=exploration_rate
               ))
-              episode_reward = 0
-              episode_steps = 0
 
           with model.status.timings['remember']:
             for e in experience_buffer.process(exp, best):
@@ -162,7 +177,7 @@ def train_epoch(model: LearningModel, game: Game, hyperparams: TrainingHyperpara
     loss=total_loss.get(),
     episode_reward=er,
     duration_seconds=time() - t0
-  ), episode_reward, episode_steps
+  )
 
 
 def train(model: LearningModel, game_factory: GameFactory, hyperparams: TrainingHyperparameters, train_epochs,
@@ -176,7 +191,6 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
   :param save_every: save the model state every x epochs
   :param example_every: saves an example gameplay every x epochs
   :param validation_episodes: validation after each epoch for that many episodes
-  :param avg_over_last_episodes: Length of running average window (for logging)
   :return: None
   """
   print('Starting training for %d epochs a %d steps (with batch_size %d)' % (train_epochs,
@@ -194,19 +208,16 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
       else:
         _play_and_remember_steps(model, game, hyperparams, hyperparams.init_memory_steps)
 
-  train_episode_steps = 0
-  train_episode_reward = 0
   validation_game = game_factory()
   train_game = game_factory()
   train_game.reset()
+  episode_tracker = EpisodeTracker()
   for epoch in range(train_epochs):
     print('Epoch: %3d' % (model.status.trained_for_epochs + 1))
     exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
     beta = hyperparams.beta(model.status.trained_for_epochs)
 
-    epoch_log, train_episode_reward, train_episode_steps = train_epoch(model, train_game,
-                                                                       hyperparams, beta, exploration_rate,
-                                                                       train_episode_reward, train_episode_steps)
+    epoch_log = train_epoch(model, train_game, hyperparams, beta, exploration_rate, episode_tracker)
 
     model.status.training_log.append(epoch_log)
     log_training(model, epoch_log)
@@ -229,7 +240,9 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
 
 def log_training(model: LearningModel, epoch_log: EpochTrainingLog) -> None:
   def avg_over(n: int) -> float:
-    return np.mean([episode.reward for episode in model.status.training_episodes[-n:]])
+    avg: float = np.mean([episode.reward for episode in model.status.training_episodes[-n:]])
+    return avg
+
   avgs = [5, 10, 25, 50, 100]
   if epoch_log.episodes != 0:
     avgs_over = ['%6.2f (%d)' % (avg_over(n), n) for n in avgs]
