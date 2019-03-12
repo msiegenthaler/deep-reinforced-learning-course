@@ -1,14 +1,17 @@
+import random
 from time import time
-from typing import Dict
+from typing import Dict, NamedTuple, Optional
 
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import torch
 from torch import nn, Tensor
 
-from drl.deepq.game import Game
+from drl.deepq.game import Game, Experience
 from drl.deepq.model import ExecutionModel, ValidationLog
+from drl.deepq.multistep import create_experience_buffer
 from drl.utils.stats import FloatStatCollector
+from drl.utils.timings import Timings
 
 
 def best_action(device, policy_net: nn.Module, state: Tensor) -> int:
@@ -23,6 +26,60 @@ def best_action(device, policy_net: nn.Module, state: Tensor) -> int:
     qs = policy_net(s)
     index = qs.max(1)[1].view(1, 1).item()
     return index
+
+
+class ChosenAction(NamedTuple):
+  action_index: int
+  is_best: bool
+
+
+def chose_action(network: nn.Module, device: str, state: Tensor, exploration_rate: float) -> ChosenAction:
+  """
+  :returns (index of the chosen action, whether the action is 'best' (True) or random (False))
+  """
+  if random.random() < exploration_rate:
+    return ChosenAction(random.randrange(network.action_count), False)
+  action = best_action(device, network, state)
+  return ChosenAction(action, True)
+
+
+class EpisodeCompleted(NamedTuple):
+  steps: int
+  reward: float
+
+
+class GameExecutor:
+  def __init__(self, game: Game, timings: Timings, multi_step_n: int, gamma: float):
+    self.game = game
+    self.timings = timings
+    self.experience_buffer = create_experience_buffer(multi_step_n, gamma)
+    self.episode_steps = 0
+    self.episode_reward = 0.
+    self.state = self.game.reset().as_tensor()
+
+  def step(self, network, device, exploration_rate) -> (Optional[EpisodeCompleted], [Experience]):
+    with self.timings['forward action']:
+      action = chose_action(network, device, self.state, exploration_rate)
+    with self.timings['game']:
+      exp = self.game.step(self.game.actions[action.action_index])
+      self.state = exp.state_after.as_tensor()
+      self.episode_steps += 1
+      self.episode_reward += exp.reward
+      if exp.done:
+        episode_completed = EpisodeCompleted(self.episode_steps, self.episode_reward)
+        self.episode_steps = 0
+        self.episode_reward = 0.
+      else:
+        episode_completed = None
+    with self.timings['remember']:
+      exps = self.experience_buffer.process(exp, action.is_best)
+    return episode_completed, exps
+
+  def __enter__(self):
+    return self
+
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    self.game.close()
 
 
 def run_episode(model: ExecutionModel, game: Game) -> (float, int, Dict[str, int]):

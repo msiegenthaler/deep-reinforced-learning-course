@@ -1,21 +1,18 @@
 import math
 import random
-from collections import deque
 from time import time
-from typing import NamedTuple, Callable, Optional, List
+from typing import NamedTuple, Callable
 
 import numpy as np
-from torch import Tensor, nn, multiprocessing
-from torch.multiprocessing import Process, Queue, spawn
 
+from drl.deepq.async_execution import AsyncGameExecutor
 from drl.deepq.checkpoint import save_checkpoint
-from drl.deepq.execution import best_action, run_validation, play_example
-from drl.deepq.game import Game, GameFactory, Experience
+from drl.deepq.execution import run_validation, play_example, GameExecutor, chose_action
+from drl.deepq.game import Game, GameFactory
 from drl.deepq.learn import learn_from_memory
 from drl.deepq.model import LearningModel, EpochTrainingLog, EpisodeLog
 from drl.deepq.multistep import create_experience_buffer
 from drl.utils.stats import FloatStatCollector
-from drl.utils.timings import Timings
 
 
 def linear_decay(delta: float, min_value: float = 0., max_value: float = 1.):
@@ -98,21 +95,6 @@ def _warm_up(model: LearningModel, params: TrainingHyperparameters) -> None:
       raise ValueError('infinite loss after part 2 round %d' % r)
 
 
-class ChosenAction(NamedTuple):
-  action_index: int
-  is_best: bool
-
-
-def chose_action(network: nn.Module, device: str, state: Tensor, exploration_rate: float) -> ChosenAction:
-  """
-  :returns (index of the chosen action, whether the action is 'best' (True) or random (False))
-  """
-  if random.random() < exploration_rate:
-    return ChosenAction(random.randrange(network.action_count), False)
-  action = best_action(device, network, state)
-  return ChosenAction(action, True)
-
-
 class EpisodeTracker:
   def __init__(self):
     self.steps = 0
@@ -128,130 +110,6 @@ class EpisodeTracker:
     self.steps = 0
     self.reward = 0.
     return steps, reward
-
-
-class EpisodeCompleted(NamedTuple):
-  steps: int
-  reward: float
-
-
-ActionChoser = Callable[[Tensor], ChosenAction]
-
-
-class GameExecutor:
-  def __init__(self, game: Game, timings: Timings, multi_step_n: int, gamma: float):
-    self.game = game
-    self.timings = timings
-    self.experience_buffer = create_experience_buffer(multi_step_n, gamma)
-    self.episode_steps = 0
-    self.episode_reward = 0.
-    self.state = self.game.reset().as_tensor()
-    self.experiences = []
-
-  def step(self, network, device, exploration_rate) -> Optional[EpisodeCompleted]:
-    with self.timings['forward action']:
-      action = chose_action(network, device, self.state, exploration_rate)
-    with self.timings['game']:
-      exp = self.game.step(self.game.actions[action.action_index])
-      self.state = exp.state_after.as_tensor()
-      self.episode_steps += 1
-      self.episode_reward += exp.reward
-      if exp.done:
-        episode_completed = EpisodeCompleted(self.episode_steps, self.episode_reward)
-        self.episode_steps = 0
-        self.episode_reward = 0.
-      else:
-        episode_completed = None
-    with self.timings['remember']:
-      new_exps = self.experience_buffer.process(exp, action.is_best)
-      self.experiences.extend(new_exps)
-
-    return episode_completed
-
-  def fetch_experiences(self) -> [Experience]:
-    exps = self.experiences
-    self.experiences = []
-    return exps
-
-  def __enter__(self):
-    return self
-
-  def __exit__(self, exc_type, exc_val, exc_tb):
-    self.game.close()
-
-
-class _RunGameRequest(NamedTuple):
-  set_exploration_rate: float = None
-  do_terminate: bool = False
-
-
-class RunGameResponse(NamedTuple):
-  experiences: List[Experience]
-  completed_episode: Optional[EpisodeCompleted]
-
-
-def _run_game(id, game: GameExecutor, network: nn.Module, device: str, request_queue: Queue, experience_queue: Queue):
-  print('* game worker %d started' % id)
-  exploration_rate = 1.
-  # we use this to hold past (in-the-queue) experiences in memory until they get garbage collected
-  keep_buffer = deque(maxlen=100)
-  while True:
-    try:
-      if not request_queue.empty():
-        try:
-          request: _RunGameRequest = request_queue.get(block=False)
-          if request.do_terminate:
-            print('* game worker %d terminated' % id)
-            return
-          if request.set_exploration_rate is not None:
-            exploration_rate = request.set_exploration_rate
-        except Queue.Empty:
-          pass
-
-      episodes = game.step(network, device, exploration_rate)
-      exps = game.fetch_experiences()
-      keep_buffer.extend(exps)
-      response = RunGameResponse(exps, episodes)
-      experience_queue.put(response, block=True)
-    except Exception as e:
-      print('error in worker %d: ' % id, e)
-
-
-class AsyncGameExecutor:
-  def __init__(self, game_factory: Callable[[], GameExecutor], network: nn.Module, device: str,
-               processes=1, steps_ahead=50):
-    self._experience_queue = Queue(maxsize=steps_ahead)
-    print('* starting workers')
-    self._processes = []
-    self._request_queues = []
-    for i in range(processes):
-      request_queue = Queue(maxsize=10)
-      p = Process(target=_run_game, args=(i, game_factory(), network, device, request_queue, self._experience_queue,))
-      p.start()
-      self._request_queues.append(request_queue)
-      self._processes.append(p)
-
-  def _send_to_all(self, request, block=False):
-    for request_queue in self._request_queues:
-      request_queue.put(request, block=block)
-
-  def get_experience(self) -> RunGameResponse:
-    return self._experience_queue.get(block=True)
-
-  def update_exploration_rate(self, exploration_rate):
-    self._send_to_all(_RunGameRequest(set_exploration_rate=exploration_rate))
-
-  def close(self):
-    print('shutting down worker')
-    self._send_to_all(_RunGameRequest(do_terminate=True))
-    for p in self._processes:
-      p.join()
-
-  def __enter__(self):
-    return self
-
-  def __exit__(self, exc_type, exc_val, exc_tb):
-    self.close()
 
 
 def train_epoch(model: LearningModel, game: AsyncGameExecutor, hyperparams: TrainingHyperparameters, beta: float,
