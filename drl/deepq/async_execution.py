@@ -1,6 +1,7 @@
 from collections import deque
 from typing import NamedTuple, List, Optional, Callable
 
+import torch
 from torch import nn
 from torch.multiprocessing import Process, Queue
 
@@ -18,7 +19,7 @@ class RunGameResponse(NamedTuple):
   completed_episode: Optional[EpisodeCompleted]
 
 
-def _run_game(id, game: GameExecutor, network: nn.Module, device: str,
+def _run_game(id, game: GameExecutor, network: nn.Module, device: torch.device,
               request_queue: Queue, experience_queue: Queue, keep_n: int) -> None:
   exploration_rate = 1.
   # we use this to hold past (in-the-queue) experiences in memory until they get garbage collected
@@ -42,7 +43,7 @@ def _run_game(id, game: GameExecutor, network: nn.Module, device: str,
 
 
 class AsyncGameExecutor:
-  def __init__(self, game_factory: Callable[[], GameExecutor], network: nn.Module, device: str,
+  def __init__(self, game_factory: Callable[[], GameExecutor], network: nn.Module, device: torch.device,
                processes=1, steps_ahead=50):
     self._experience_queue = Queue(maxsize=steps_ahead)
     print('* starting %d workers' % processes)

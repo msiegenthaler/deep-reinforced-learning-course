@@ -54,6 +54,13 @@ class TrainingHyperparameters(NamedTuple):
   # number of 'warmup' rounds (to avoid NaN/infinite loss)
   warmup_rounds: int = 0
 
+  # Number of games to run in parallel (for faster experience gathering)
+  parallel_game_processes: int = 1
+
+  # Max. number of steps to run in front of the neural net (delays effect on experiences)
+  # should be bigger (double or so) than game_steps_per_step
+  max_step_prefetch: int = 100
+
 
 def _prefill_memory_random(model: LearningModel, game: Game, n: int):
   """Fill the memory with n experiences"""
@@ -191,10 +198,11 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
 
   validation_game = game_factory()
 
-  def gef():
+  def create_game_executor():
     return GameExecutor(game_factory(), model.status.timings, hyperparams.multi_step_n, hyperparams.gamma)
 
-  train_game = AsyncGameExecutor(gef, model.policy_net, model.device)
+  train_game = AsyncGameExecutor(create_game_executor, model.policy_net, model.device,
+                                 hyperparams.parallel_game_processes, hyperparams.max_step_prefetch)
   for epoch in range(train_epochs):
     print('Epoch: %3d' % (model.status.trained_for_epochs + 1))
     exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)

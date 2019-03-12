@@ -33,7 +33,7 @@ class ChosenAction(NamedTuple):
   is_best: bool
 
 
-def chose_action(network: nn.Module, device: str, state: Tensor, exploration_rate: float) -> ChosenAction:
+def chose_action(network: nn.Module, device: torch.device, state: Tensor, exploration_rate: float) -> ChosenAction:
   """
   :returns (index of the chosen action, whether the action is 'best' (True) or random (False))
   """
@@ -57,7 +57,8 @@ class GameExecutor:
     self.episode_reward = 0.
     self.state = self.game.reset().as_tensor()
 
-  def step(self, network, device, exploration_rate) -> (Optional[EpisodeCompleted], [Experience]):
+  def step(self, network: nn.Module, device: torch.device,
+           exploration_rate: float) -> (Optional[EpisodeCompleted], [Experience]):
     with self.timings['forward action']:
       action = chose_action(network, device, self.state, exploration_rate)
     with self.timings['game']:
