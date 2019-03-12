@@ -1,18 +1,19 @@
 import math
 import random
 from time import time
-from typing import NamedTuple, Callable
+from typing import NamedTuple, Callable, Optional
 
 import numpy as np
 from torch import Tensor
 
 from drl.deepq.checkpoint import save_checkpoint
 from drl.deepq.execution import best_action, run_validation, play_example
-from drl.deepq.game import Game, GameFactory
+from drl.deepq.game import Game, GameFactory, Experience
 from drl.deepq.learn import learn_from_memory
 from drl.deepq.model import LearningModel, EpochTrainingLog, EpisodeLog
 from drl.deepq.multistep import create_experience_buffer
 from drl.utils.stats import FloatStatCollector
+from drl.utils.timings import Timings
 
 
 def linear_decay(delta: float, min_value: float = 0., max_value: float = 1.):
@@ -95,14 +96,19 @@ def _warm_up(model: LearningModel, params: TrainingHyperparameters) -> None:
       raise ValueError('infinite loss after part 2 round %d' % r)
 
 
-def chose_action(model: LearningModel, state: Tensor, exploration_rate: float) -> (int, bool):
+class ChosenAction(NamedTuple):
+  action_index: int
+  is_best: bool
+
+
+def chose_action(model: LearningModel, state: Tensor, exploration_rate: float) -> ChosenAction:
   """
   :returns (index of the chosen action, whether the action is 'best' (True) or random (False))
   """
   if random.random() < exploration_rate:
-    return random.randrange(model.policy_net.action_count), False
+    return ChosenAction(random.randrange(model.policy_net.action_count), False)
   action = best_action(model.device, model.policy_net, state)
-  return action, True
+  return ChosenAction(action, True)
 
 
 class EpisodeTracker:
@@ -122,40 +128,81 @@ class EpisodeTracker:
     return steps, reward
 
 
-def train_epoch(model: LearningModel, game: Game, hyperparams: TrainingHyperparameters, beta: float,
-                exploration_rate: float, episode_tracker: EpisodeTracker) -> EpochTrainingLog:
+class EpisodeCompleted(NamedTuple):
+  steps: int
+  reward: float
+
+
+class GameExecutor:
+  def __init__(self, game: Game, hyperparams: TrainingHyperparameters, timings: Timings):
+    self.game = game
+    self.timings = timings
+    self.experience_buffer = create_experience_buffer(hyperparams.multi_step_n, hyperparams.gamma)
+    self.episode_steps = 0
+    self.episode_reward = 0.
+    self.state = self.game.reset().as_tensor()
+    self.experiences = []
+
+  def step(self, action_choser: Callable[[Tensor], ChosenAction]) -> Optional[EpisodeCompleted]:
+    """
+    :param action_choser:
+    """
+    with self.timings['forward action']:
+      action = action_choser(self.state)
+    with self.timings['game']:
+      exp = self.game.step(self.game.actions[action.action_index])
+      self.state = exp.state_after.as_tensor()
+      self.episode_steps += 1
+      self.episode_reward += exp.reward
+      if exp.done:
+        episode_completed = EpisodeCompleted(self.episode_steps, self.episode_reward)
+        self.episode_steps = 0
+        self.episode_reward = 0.
+      else:
+        episode_completed = None
+    with self.timings['remember']:
+      new_exps = self.experience_buffer.process(exp, action.is_best)
+      self.experiences.extend(new_exps)
+
+    return episode_completed
+
+  def fetch_experiences(self) -> [Experience]:
+    exps = self.experiences
+    self.experiences = []
+    return exps
+
+  def __enter__(self):
+    return self
+
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    self.game.close()
+
+
+def train_epoch(model: LearningModel, game: GameExecutor, hyperparams: TrainingHyperparameters, beta: float,
+                exploration_rate: float) -> EpochTrainingLog:
   model.policy_net.train()
   t0 = time()
   episode_rewards = FloatStatCollector()
   total_loss = FloatStatCollector()
-  experience_buffer = create_experience_buffer(hyperparams.multi_step_n, hyperparams.gamma)
-  state = game.current_state().as_tensor()
   steps = math.ceil(hyperparams.game_steps_per_epoch // hyperparams.game_steps_per_step)
   with model.status.timings['epoch']:
     for step in range(steps):
       with model.status.timings['play']:
         for _ in range(hyperparams.game_steps_per_step):
-          with model.status.timings['forward action']:
-            action_index, best = chose_action(model, state, exploration_rate)
+          ep_compl = game.step(lambda s: chose_action(model, s, exploration_rate))
+          if ep_compl is not None:
+            episode_rewards.record(ep_compl.reward)
+            model.status.training_episodes.append(EpisodeLog(
+              at_training_epoch=model.status.trained_for_epochs + 1,
+              at_training_step=model.status.trained_for_steps + step,
+              reward=ep_compl.reward,
+              steps=ep_compl.steps,
+              exploration_rate=exploration_rate
+            ))
 
-          with model.status.timings['game']:
-            exp = game.step(game.actions[action_index])
-            state = exp.state_after.as_tensor()
-            episode_tracker.track(exp.reward)
-            if exp.done:
-              episode_steps, episode_reward = episode_tracker.episode_done()
-              episode_rewards.record(episode_reward)
-              model.status.training_episodes.append(EpisodeLog(
-                at_training_epoch=model.status.trained_for_epochs + 1,
-                at_training_step=model.status.trained_for_steps + step,
-                reward=episode_reward,
-                steps=episode_steps,
-                exploration_rate=exploration_rate
-              ))
-
-          with model.status.timings['remember']:
-            for e in experience_buffer.process(exp, best):
-              model.memory.remember(e)
+      with model.status.timings['remember']:
+        for e in game.fetch_experiences():
+          model.memory.remember(e)
 
       with model.status.timings['learn']:
         if step % hyperparams.copy_to_target_every == 0:
@@ -209,31 +256,28 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
         _play_and_remember_steps(model, game, hyperparams, hyperparams.init_memory_steps)
 
   validation_game = game_factory()
-  train_game = game_factory()
-  train_game.reset()
-  episode_tracker = EpisodeTracker()
-  for epoch in range(train_epochs):
-    print('Epoch: %3d' % (model.status.trained_for_epochs + 1))
-    exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
-    beta = hyperparams.beta(model.status.trained_for_epochs)
+  with GameExecutor(game_factory(), hyperparams, model.status.timings) as train_game:
+    for epoch in range(train_epochs):
+      print('Epoch: %3d' % (model.status.trained_for_epochs + 1))
+      exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
+      beta = hyperparams.beta(model.status.trained_for_epochs)
 
-    epoch_log = train_epoch(model, train_game, hyperparams, beta, exploration_rate, episode_tracker)
+      epoch_log = train_epoch(model, train_game, hyperparams, beta, exploration_rate)
 
-    model.status.training_log.append(epoch_log)
-    log_training(model, epoch_log)
+      model.status.training_log.append(epoch_log)
+      log_training(model, epoch_log)
 
-    if validation_episodes > 0:
-      print_validation(model, validation_game, validation_episodes)
+      if validation_episodes > 0:
+        print_validation(model, validation_game, validation_episodes)
 
-    if save_every != 0 and model.status.trained_for_epochs % save_every == 0:
-      save_checkpoint(model)
+      if save_every != 0 and model.status.trained_for_epochs % save_every == 0:
+        save_checkpoint(model)
 
-    if example_every != 0 and model.status.trained_for_epochs % example_every == 0:
-      video, v_s, v_r = play_example(model.exec(), validation_game, 'epoch%04d' % model.status.trained_for_epochs,
-                                     silent=True)
-      print(' - saved example gameplay video to %s (reward: %.0f, steps: %d)' % (video, v_r, v_s))
+      if example_every != 0 and model.status.trained_for_epochs % example_every == 0:
+        video, v_s, v_r = play_example(model.exec(), validation_game, 'epoch%04d' % model.status.trained_for_epochs,
+                                       silent=True)
+        print(' - saved example gameplay video to %s (reward: %.0f, steps: %d)' % (video, v_r, v_s))
 
-  train_game.close()
   validation_game.close()
   print('Done training for %d epochs' % train_epochs)
 
