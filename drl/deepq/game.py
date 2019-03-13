@@ -1,6 +1,6 @@
 import abc
 from collections import deque
-from typing import NamedTuple, Callable
+from typing import NamedTuple, Callable, List
 
 import torch
 
@@ -11,10 +11,15 @@ class Action(NamedTuple):
   index: int
 
 
-class State(abc.ABC):
-  @abc.abstractmethod
+class State(NamedTuple):
+  """
+  Much more memory efficient than stacking upfront.
+  This way each frame is only held in memory once but used in mutiple states
+  """
+  frames: List[torch.Tensor]
+
   def as_tensor(self) -> torch.Tensor:
-    pass
+    """Combined tensor of the complete state"""
 
 
 class Experience(NamedTuple):
@@ -66,16 +71,6 @@ class Game(abc.ABC):
 GameFactory = Callable[[], Game]
 
 
-class LazyFrameState(State):
-  """Much more memory efficient that stacking right on return, this way each frame is only held in memory once"""
-
-  def __init__(self, frames: [torch.Tensor]):
-    self._frames = frames
-
-  def as_tensor(self):
-    return torch.stack(self._frames)
-
-
 class Frames:
   """Holds a history of the t last frames and provides them as the state"""
 
@@ -90,5 +85,5 @@ class Frames:
   def add_frame(self, frame: torch.Tensor):
     self.deque.append(frame)
 
-  def state(self) -> LazyFrameState:
-    return LazyFrameState([t for t in self.deque])
+  def state(self) -> State:
+    return State(frames=[t for t in self.deque])

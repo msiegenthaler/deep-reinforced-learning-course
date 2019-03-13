@@ -1,5 +1,4 @@
 import math
-import queue
 import random
 from time import time
 from typing import NamedTuple, Callable
@@ -145,9 +144,11 @@ def train_epoch(model: LearningModel, game: AsyncGameExecutor, hyperparams: Trai
         for e in experiences:
           model.memory.remember(e)
 
-      with model.status.timings['learn']:
-        if step % hyperparams.copy_to_target_every == 0:
+      if step % hyperparams.copy_to_target_every == 0:
+        with model.status.timings['copy net']:
           model.target_net.load_state_dict(model.policy_net.state_dict())
+
+      with model.status.timings['learn']:
         loss = learn_from_memory(model, hyperparams.batch_size, hyperparams.gamma, beta)
         if math.isnan(loss) or math.isinf(loss):
           raise ValueError('infinite loss')

@@ -4,6 +4,22 @@ from torch import Tensor, tensor
 
 from drl.deepq.game import Experience
 from drl.deepq.model import LearningModel
+from drl.utils.timings import Timings
+
+
+def _state_from_experiences(exps: [Experience], before: bool):
+  frames = []
+  frame_shape = exps[0].state_before.frames[0].shape
+  count = 0
+  for e in exps:
+    if before:
+      count += 1
+      frames.extend(e.state_before.frames)
+    elif not e.done:
+      count += 1
+      frames.extend(e.state_after.frames)
+  state = torch.cat(tuple(frames))
+  return state.reshape((count, -1, *frame_shape))
 
 
 def get_target_action_values(model: LearningModel, gamma: float, exps: [Experience]) -> Tensor:
@@ -11,31 +27,35 @@ def get_target_action_values(model: LearningModel, gamma: float, exps: [Experien
   :param gamma: discounting factor for future (next-step) rewards (e.g. 0.99)
   :param exps: Experiences to calculate target action values for
   """
-  next_states = torch.stack([e.state_after.as_tensor() for e in exps if not e.done]).to(model.device)
   non_final_mask = tensor(tuple(map(lambda e: not e.done, exps)), device=model.device, dtype=torch.uint8)
+  next_states = _state_from_experiences(exps, False).to(model.device, non_blocking=True)
   next_state_values = torch.zeros(len(exps), device=model.device)
   next_state_values[non_final_mask] = model.target_net(next_states).max(1)[0].detach()
-  lengths = tensor([e.state_difference_in_steps for e in exps]).to(model.device)
-  gammas = torch.pow(tensor(gamma).to(model.device), lengths.float()).detach()
+
+  lengths = tensor([e.state_difference_in_steps for e in exps]).to(model.device, non_blocking=True)
+  gammas = torch.pow(tensor(gamma).to(model.device, non_blocking=True), lengths.float()).detach()
 
   rewards = tensor([e.reward for e in exps], device=model.device)
   target_action_values = (next_state_values * gammas) + rewards
   return target_action_values.unsqueeze(1)
 
 
-def calculate_losses(model: LearningModel, gamma: float, exps: [Experience]) -> Tensor:
+def calculate_losses(model: LearningModel, timings: Timings, gamma: float, exps: [Experience]) -> Tensor:
   """
   :param model: the model
+  :param timings: to record time taken
   :param gamma: discounting factor for future (next-step) rewards (e.g. 0.99)
   :param exps: Experiences calculate losses for
   """
-  target_action_values = get_target_action_values(model, gamma, exps).detach()
+  with timings['    get target action value']:
+    target_action_values = get_target_action_values(model, gamma, exps).detach()
 
-  states = torch.stack([e.state_before.as_tensor() for e in exps])
-  states = states.to(model.device)
-  actions = torch.stack([tensor([e.action.index]) for e in exps])
-  actions = actions.to(model.device)
-  predicted_action_values = model.policy_net(states).gather(1, actions)
+  with timings['    predicted action values']:
+    states = _state_from_experiences(exps, True). \
+      to(model.device, non_blocking=True)
+    actions = torch.stack([tensor([e.action.index]) for e in exps]).\
+      to(model.device, non_blocking=True)
+    predicted_action_values = model.policy_net(states).gather(1, actions)
 
   return F.mse_loss(predicted_action_values, target_action_values, reduction='none')
 
@@ -51,24 +71,24 @@ def learn_from_memory(model: LearningModel, batch_size: int, gamma: float, beta:
   if model.memory.size() < batch_size:
     raise ValueError('memory contains less than batch_size (%d) samples' % batch_size)
 
-  with model.status.timings['sample from memory']:
+  with model.status.timings['  sample from memory']:
     sample = model.memory.sample(batch_size)
     exps = [s.experience for s in sample]
     weights = tensor([s.weight(beta) for s in sample])
-    weights = weights.to(model.device)
+    weights = weights.to(model.device, non_blocking=True)
 
-  with model.status.timings['forward loss']:
-    losses = calculate_losses(model, gamma, exps)
+  with model.status.timings['  forward loss']:
+    losses = calculate_losses(model, model.status.timings, gamma, exps)
     loss = torch.mean(losses * weights)
 
-  with model.status.timings['backprop loss']:
+  with model.status.timings['  backprop loss']:
     model.optimizer.zero_grad()
     loss.backward()
     model.optimizer.step()
     if torch.cuda.is_available():
       torch.cuda.synchronize()  # for the timings
 
-  with model.status.timings['update memory weights']:
+  with model.status.timings['  update memory weights']:
     model.memory.update_weights(sample, losses.detach())
 
   return loss.item()
