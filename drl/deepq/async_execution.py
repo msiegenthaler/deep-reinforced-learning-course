@@ -1,5 +1,4 @@
-from collections import deque
-from typing import NamedTuple, List, Optional, Callable
+from typing import NamedTuple, List, Callable
 
 import torch
 from torch import nn
@@ -16,14 +15,13 @@ class _RunGameRequest(NamedTuple):
 
 class RunGameResponse(NamedTuple):
   experiences: List[Experience]
-  completed_episode: Optional[EpisodeCompleted]
+  completed_episode: List[EpisodeCompleted]
 
 
 def _run_game(id, game: GameExecutor, network: nn.Module, device: torch.device,
-              request_queue: Queue, experience_queue: Queue, keep_n: int) -> None:
+              request_queue: Queue, experience_queue: Queue, batch_size: int) -> None:
   exploration_rate = 1.
   # we use this to hold past (in-the-queue) experiences in memory until they get garbage collected
-  keep_buffer = deque(maxlen=keep_n)
   while True:
     try:
       if not request_queue.empty():
@@ -34,8 +32,13 @@ def _run_game(id, game: GameExecutor, network: nn.Module, device: torch.device,
         if request.set_exploration_rate is not None:
           exploration_rate = request.set_exploration_rate
 
-      episodes, exps = game.step(network, device, exploration_rate)
-      keep_buffer.extend(exps)
+      episodes = []
+      exps = []
+      for _ in range(batch_size):
+        episode, new_exps = game.step(network, device, exploration_rate)
+        if episode is not None:
+          episodes.append(episode)
+        exps.extend(new_exps)
       response = RunGameResponse(exps, episodes)
       experience_queue.put(response, block=True)
     except Exception as e:
@@ -44,7 +47,7 @@ def _run_game(id, game: GameExecutor, network: nn.Module, device: torch.device,
 
 class AsyncGameExecutor:
   def __init__(self, game_factory: Callable[[], GameExecutor], network: nn.Module, device: torch.device,
-               processes=1, steps_ahead=50):
+               processes=1, steps_ahead=50, batch_size=1):
     self._experience_queue = Queue(maxsize=steps_ahead)
     print('* starting %d workers' % processes)
     self._processes = []
@@ -52,7 +55,7 @@ class AsyncGameExecutor:
     for i in range(processes):
       request_queue = Queue(maxsize=10)
       p = Process(target=_run_game, args=(i, game_factory(), network, device, request_queue,
-                                          self._experience_queue, steps_ahead + 1,))
+                                          self._experience_queue,batch_size,))
       p.start()
       self._request_queues.append(request_queue)
       self._processes.append(p)
@@ -61,8 +64,8 @@ class AsyncGameExecutor:
     for request_queue in self._request_queues:
       request_queue.put(request, block=block)
 
-  def get_experience(self) -> RunGameResponse:
-    return self._experience_queue.get(block=True)
+  def get_experience(self, block=True) -> RunGameResponse:
+    return self._experience_queue.get(block=block)
 
   def update_exploration_rate(self, exploration_rate):
     self._send_to_all(_RunGameRequest(set_exploration_rate=exploration_rate))

@@ -1,4 +1,5 @@
 import math
+import queue
 import random
 from time import time
 from typing import NamedTuple, Callable
@@ -13,6 +14,7 @@ from drl.deepq.learn import learn_from_memory
 from drl.deepq.model import LearningModel, EpochTrainingLog, EpisodeLog
 from drl.deepq.multistep import create_experience_buffer
 from drl.utils.stats import FloatStatCollector
+from drl.utils.timings import Timings
 
 
 def linear_decay(delta: float, min_value: float = 0., max_value: float = 1.):
@@ -57,9 +59,8 @@ class TrainingHyperparameters(NamedTuple):
   # Number of games to run in parallel (for faster experience gathering)
   parallel_game_processes: int = 1
 
-  # Max. number of steps to run in front of the neural net (delays effect on experiences)
-  # should be bigger (double or so) than game_steps_per_step
-  max_step_prefetch: int = 100
+  # Max. number of minibatches to run in front of the neural net (delays effect on experiences)
+  max_batches_prefetch: int = 5
 
 
 def _prefill_memory_random(model: LearningModel, game: Game, n: int):
@@ -129,21 +130,20 @@ def train_epoch(model: LearningModel, game: AsyncGameExecutor, hyperparams: Trai
   game.update_exploration_rate(exploration_rate)
   with model.status.timings['epoch']:
     for step in range(steps):
-      for _ in range(hyperparams.game_steps_per_step):
-        with model.status.timings['wait_for_game']:
-          experiences, completed_episode = game.get_experience()
-        if completed_episode is not None:
-          episode_rewards.record(completed_episode.reward)
-          model.status.training_episodes.append(EpisodeLog(
-            at_training_epoch=model.status.trained_for_epochs + 1,
-            at_training_step=model.status.trained_for_steps + step,
-            reward=completed_episode.reward,
-            steps=completed_episode.steps,
-            exploration_rate=exploration_rate
-          ))
-        with model.status.timings['remember']:
-          for e in experiences:
-            model.memory.remember(e)
+      with model.status.timings['wait_for_game']:
+        experiences, completed_episodes = game.get_experience()
+      for completed_episode in completed_episodes:
+        episode_rewards.record(completed_episode.reward)
+        model.status.training_episodes.append(EpisodeLog(
+          at_training_epoch=model.status.trained_for_epochs + 1,
+          at_training_step=model.status.trained_for_steps + step,
+          reward=completed_episode.reward,
+          steps=completed_episode.steps,
+          exploration_rate=exploration_rate
+        ))
+      with model.status.timings['remember']:
+        for e in experiences:
+          model.memory.remember(e)
 
       with model.status.timings['learn']:
         if step % hyperparams.copy_to_target_every == 0:
@@ -160,7 +160,7 @@ def train_epoch(model: LearningModel, game: AsyncGameExecutor, hyperparams: Trai
   return EpochTrainingLog(
     episodes=er.count,
     trainings=steps,
-    game_steps=hyperparams.game_steps_per_epoch,
+    game_steps=steps * hyperparams.game_steps_per_step,
     parameter_values=params,
     loss=total_loss.get(),
     episode_reward=er,
@@ -199,10 +199,12 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
   validation_game = game_factory()
 
   def create_game_executor():
-    return GameExecutor(game_factory(), model.status.timings, hyperparams.multi_step_n, hyperparams.gamma)
+    return GameExecutor(game_factory(), Timings(), hyperparams.multi_step_n, hyperparams.gamma)
 
   train_game = AsyncGameExecutor(create_game_executor, model.policy_net, model.device,
-                                 hyperparams.parallel_game_processes, hyperparams.max_step_prefetch)
+                                 hyperparams.parallel_game_processes, hyperparams.max_batches_prefetch,
+                                 hyperparams.game_steps_per_step)
+  train_game.get_experience()  # wait the games to start
   for epoch in range(train_epochs):
     print('Epoch: %3d' % (model.status.trained_for_epochs + 1))
     exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
