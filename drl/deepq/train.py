@@ -185,7 +185,6 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
   print('Starting training for %d epochs a %d steps (with batch_size %d)' % (train_epochs,
                                                                              hyperparams.game_steps_per_epoch,
                                                                              hyperparams.batch_size))
-
   if model.memory.size() < hyperparams.init_memory_steps:
     print('- Prefilling memory with %d steps' % hyperparams.init_memory_steps)
     with game_factory() as game:

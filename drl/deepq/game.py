@@ -20,6 +20,7 @@ class State(NamedTuple):
 
   def as_tensor(self) -> torch.Tensor:
     """Combined tensor of the complete state"""
+    return torch.stack(tuple(self.frames))
 
 
 class Experience(NamedTuple):
@@ -74,15 +75,18 @@ GameFactory = Callable[[], Game]
 class Frames:
   """Holds a history of the t last frames and provides them as the state"""
 
-  def __init__(self, t: int):
+  def __init__(self, t: int, device: torch.device):
     self.t = t
     self.deque = deque(maxlen=t)
+    self.device = device
 
   def add_initial_frame(self, frame: torch.Tensor):
+    frame = frame.to(self.device, non_blocking=True)
     for i in range(self.t):
       self.deque.append(frame)
 
   def add_frame(self, frame: torch.Tensor):
+    frame = frame.to(self.device, non_blocking=True)
     self.deque.append(frame)
 
   def state(self) -> State:

@@ -33,17 +33,15 @@ if __name__ == '__main__':
     multi_step_n=4,
     warmup_rounds=100,
     init_memory_steps=10000,
-    parallel_game_processes=0,
-    max_batches_prefetch=8
+    parallel_game_processes=2,
+    max_batches_prefetch=3
   )
-
-
-  def create_game():
-    return Pong(w, h, t)
-
 
   device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
   print('Using device %s' % device)
+
+  def create_game():
+    return Pong(w, h, t, device)
 
   with create_game() as _game:
     memory = PrioritizedReplayMemory(memory_size)

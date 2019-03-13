@@ -59,9 +59,9 @@ class GameExecutor:
 
   def step(self, network: nn.Module, device: torch.device,
            exploration_rate: float) -> (Optional[EpisodeCompleted], [Experience]):
-    with self.timings['forward action']:
+    with self.timings['  forward action']:
       action = chose_action(network, device, self.state, exploration_rate)
-    with self.timings['game']:
+    with self.timings['  game']:
       exp = self.game.step(self.game.actions[action.action_index])
       self.state = exp.state_after.as_tensor()
       self.episode_steps += 1
@@ -72,7 +72,7 @@ class GameExecutor:
         self.episode_reward = 0.
       else:
         episode_completed = None
-    with self.timings['remember']:
+    with self.timings['  postprocess game']:
       exps = self.experience_buffer.process(exp, action.is_best)
     return episode_completed, exps
 
