@@ -6,7 +6,7 @@ from typing import NamedTuple, Callable
 
 import numpy as np
 
-from drl.deepq.async_execution import AsyncGameExecutor
+from drl.deepq.async_execution import AsyncGameExecutor, create_async_game_executor
 from drl.deepq.checkpoint import save_checkpoint
 from drl.deepq.execution import run_validation, play_example, GameExecutor, chose_action
 from drl.deepq.game import Game, GameFactory
@@ -131,7 +131,7 @@ def train_epoch(model: LearningModel, game: AsyncGameExecutor, hyperparams: Trai
   with model.status.timings['epoch']:
     for step in range(steps):
       with model.status.timings['wait_for_game']:
-        experiences, completed_episodes = game.get_experience()
+        completed_episodes, experiences = game.get_experience()
       for completed_episode in completed_episodes:
         episode_rewards.record(completed_episode.reward)
         model.status.training_episodes.append(EpisodeLog(
@@ -201,9 +201,9 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
   def create_game_executor():
     return GameExecutor(game_factory(), Timings(), hyperparams.multi_step_n, hyperparams.gamma)
 
-  train_game = AsyncGameExecutor(create_game_executor, model.policy_net, model.device,
-                                 hyperparams.parallel_game_processes, hyperparams.max_batches_prefetch,
-                                 hyperparams.game_steps_per_step)
+  train_game = create_async_game_executor(create_game_executor, model.policy_net, model.device,
+                                          hyperparams.parallel_game_processes, hyperparams.max_batches_prefetch,
+                                          hyperparams.game_steps_per_step)
   train_game.get_experience()  # wait the games to start
   for epoch in range(train_epochs):
     print('Epoch: %3d' % (model.status.trained_for_epochs + 1))

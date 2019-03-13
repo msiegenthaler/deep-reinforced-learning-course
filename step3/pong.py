@@ -1,4 +1,6 @@
 # %%
+import multiprocessing
+
 import torch
 from torch.optim import Adam
 
@@ -31,7 +33,7 @@ if __name__ == '__main__':
     multi_step_n=4,
     warmup_rounds=100,
     init_memory_steps=10000,
-    parallel_game_processes=4,
+    parallel_game_processes=0,
     max_batches_prefetch=8
   )
 

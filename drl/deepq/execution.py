@@ -76,11 +76,25 @@ class GameExecutor:
       exps = self.experience_buffer.process(exp, action.is_best)
     return episode_completed, exps
 
+  def multi_step(self, network: nn.Module, device: torch.device,
+                 exploration_rate: float, n: int) -> ([EpisodeCompleted], [Experience]):
+    episodes = []
+    exps = []
+    for _ in range(n):
+      episode, new_exps = self.step(network, device, exploration_rate)
+      if episode is not None:
+        episodes.append(episode)
+      exps.extend(new_exps)
+    return episodes, exps
+
+  def close(self):
+    self.game.close()
+
   def __enter__(self):
     return self
 
   def __exit__(self, exc_type, exc_val, exc_tb):
-    self.game.close()
+    self.close()
 
 
 def run_episode(model: ExecutionModel, game: Game) -> (float, int, Dict[str, int]):
