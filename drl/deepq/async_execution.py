@@ -11,8 +11,7 @@ from drl.deepq.game import Experience
 
 class AsyncGameExecutor(abc.ABC):
   @abc.abstractmethod
-  # TODO rename method and return value
-  def get_experience(self) -> ([EpisodeCompleted, Experience]):
+  def get_experiences(self) -> ([EpisodeCompleted, Experience]):
     pass
 
   @abc.abstractmethod
@@ -41,7 +40,7 @@ class NotAyncGameExecutor(AsyncGameExecutor):
     self._batch_size = batch_size
     self.exploration_rate = 0.
 
-  def get_experience(self):
+  def get_experiences(self):
     return self._game.multi_step(self._network, self._device, self.exploration_rate, self._batch_size)
 
   def update_exploration_rate(self, exploration_rate):
@@ -95,7 +94,7 @@ class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
     for request_queue in self._request_queues:
       request_queue.put(request, block=block)
 
-  def get_experience(self, block=True):
+  def get_experiences(self, block=True):
     return self._experience_queue.get(block=block)
 
   def update_exploration_rate(self, exploration_rate):
