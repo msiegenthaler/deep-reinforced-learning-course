@@ -1,6 +1,6 @@
 import abc
 from collections import deque
-from typing import NamedTuple, Callable, List
+from typing import NamedTuple, Callable, List, Optional
 
 import torch
 
@@ -17,14 +17,20 @@ class State(NamedTuple):
   This way each frame is only held in memory once but used in mutiple states
   """
   frames: List[torch.Tensor]
+  on_device: Optional[torch.Tensor] = None
 
   def as_tensor(self) -> torch.Tensor:
     """Combined tensor of the complete state"""
+    if self.on_device is not None:
+      return self.on_device.reshape(-1, *self.frames[0].shape)
     return torch.stack(tuple(self.frames))
 
   def to_device(self, device):
+    if self.on_device:
+      return
     frames = [f.to(device, non_blocking=True) for f in self.frames]
-    return State(frames)
+    t = torch.cat(tuple(frames)).to(device, non_blocking=True)
+    return State(self.frames, t)
 
 
 class Experience(NamedTuple):

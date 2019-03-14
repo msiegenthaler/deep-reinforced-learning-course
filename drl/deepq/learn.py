@@ -14,10 +14,16 @@ def _state_from_experiences(exps: [Experience], before: bool):
   for e in exps:
     if before:
       count += 1
-      frames.extend(e.state_before.frames)
+      if e.state_before.on_device is not None:
+        frames.append(e.state_before.on_device)
+      else:
+        frames.extend(e.state_before.frames)
     elif not e.done:
       count += 1
-      frames.extend(e.state_after.frames)
+      if e.state_after.on_device is not None:
+        frames.append(e.state_after.on_device)
+      else:
+        frames.extend(e.state_after.frames)
   state = torch.cat(tuple(frames))
   return state.reshape((count, -1, *frame_shape))
 
