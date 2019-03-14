@@ -3,6 +3,7 @@ import os
 import torch
 
 from drl.deepq.model import LearningModel
+from drl.utils.timings import Timings
 
 
 def save_checkpoint(model: LearningModel) -> str:
@@ -18,7 +19,8 @@ def save_checkpoint(model: LearningModel) -> str:
     'steps': model.status.trained_for_steps,
     'optimizer_state_dict': model.optimizer.state_dict(),
     'model_state_dict': model.policy_net.state_dict(),
-    'model_description': str(model.policy_net)
+    'model_description': str(model.policy_net),
+    'timings': model.status.timings
   }
   file = 'checkpoints/%s-%s-%04d.pt' % (model.game_name, model.strategy_name, model.status.trained_for_epochs)
   torch.save(data, file)
@@ -38,7 +40,7 @@ def load_checkpoint(model: LearningModel, suffix: str = 'last') -> bool:
     model.status.training_log = data['status_trainingLog']
     model.status.training_episodes = data['status_training_episodes'] if 'status_training_episodes' in data else []
     model.status.validation_log = data['status_validationLog']
-    model.status.timings.reset()
+    model.status.timings = data['timings'] if 'timings' in data else Timings()
     model.optimizer.load_state_dict(data['optimizer_state_dict'])
     model.policy_net.load_state_dict(data['model_state_dict'])
     model.target_net.load_state_dict(data['model_state_dict'])
