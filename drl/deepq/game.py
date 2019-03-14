@@ -22,6 +22,10 @@ class State(NamedTuple):
     """Combined tensor of the complete state"""
     return torch.stack(tuple(self.frames))
 
+  def to_device(self, device):
+    frames = [f.to(device, non_blocking=True) for f in self.frames]
+    return State(frames)
+
 
 class Experience(NamedTuple):
   state_before: State
@@ -30,6 +34,10 @@ class Experience(NamedTuple):
   reward: float
   done: bool
   state_difference_in_steps: int = 1  # number of steps between state_before and state_after
+
+  def to_device(self, device: torch.device):
+    return self._replace(state_before=self.state_before.to_device(device),
+                         state_after=self.state_after.to_device(device))
 
 
 class Game(abc.ABC):
@@ -75,19 +83,23 @@ GameFactory = Callable[[], Game]
 class Frames:
   """Holds a history of the t last frames and provides them as the state"""
 
-  def __init__(self, t: int, device: torch.device):
+  def __init__(self, t: int, pin_memory=True):
     self.t = t
     self.deque = deque(maxlen=t)
-    self.device = device
+    self.pin_memory = pin_memory
 
   def add_initial_frame(self, frame: torch.Tensor):
-    frame = frame.to(self.device, non_blocking=True)
+    frame = self._wrap_frame(frame)
     for i in range(self.t):
       self.deque.append(frame)
 
   def add_frame(self, frame: torch.Tensor):
-    frame = frame.to(self.device, non_blocking=True)
-    self.deque.append(frame)
+    self.deque.append(self._wrap_frame(frame))
+
+  def _wrap_frame(self, frame):
+    if self.pin_memory:
+      frame = frame.pin_memory()
+    return frame
 
   def state(self) -> State:
     return State(frames=[t for t in self.deque])

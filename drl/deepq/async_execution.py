@@ -1,4 +1,5 @@
 import abc
+import queue
 from typing import NamedTuple, Callable
 
 import torch
@@ -33,15 +34,20 @@ GameFactory = Callable[[], GameExecutor]
 
 
 class NotAyncGameExecutor(AsyncGameExecutor):
-  def __init__(self, game_factory: GameFactory, network: nn.Module, device: torch.device, batch_size: int):
+  def __init__(self, game_factory: GameFactory, network: nn.Module, device: torch.device, batch_size: int,
+               states_on_device: bool):
     self._game: GameExecutor = game_factory()
     self._network = network
     self._device = device
     self._batch_size = batch_size
     self.exploration_rate = 0.
+    self._states_on_device = states_on_device
 
   def get_experiences(self):
-    return self._game.multi_step(self._network, self._device, self.exploration_rate, self._batch_size)
+    eps, exps = self._game.multi_step(self._network, self._device, self.exploration_rate, self._batch_size)
+    if self._states_on_device:
+      exps = [e.to_device(self._device) for e in exps]
+    return eps, exps
 
   def update_exploration_rate(self, exploration_rate):
     self.exploration_rate = exploration_rate
@@ -59,12 +65,15 @@ def _run_game(process_id: int, game: GameExecutor, network: nn.Module, device: t
               request_queue: Queue, experience_queue: Queue, batch_size: int) -> None:
   exploration_rate = 1.
   # we use this to hold past (in-the-queue) experiences in memory until they get garbage collected
+  print('* worker %d started' % process_id)
   while True:
     try:
       if not request_queue.empty():
         request: _RunGameRequest = request_queue.get(block=False)
         if request.do_terminate:
           print('* game worker %d terminated' % process_id)
+          experience_queue.close()
+          request_queue.close()
           return
         if request.set_exploration_rate is not None:
           exploration_rate = request.set_exploration_rate
@@ -77,7 +86,9 @@ def _run_game(process_id: int, game: GameExecutor, network: nn.Module, device: t
 
 class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
   def __init__(self, game_factory: GameFactory, network: nn.Module, device: torch.device,
-               processes=1, steps_ahead=50, batch_size=1):
+               processes: int, steps_ahead: int, batch_size: int, states_on_device: bool):
+    self._states_on_device = states_on_device
+    self._device = device
     self._experience_queue = Queue(maxsize=steps_ahead)
     print('* starting %d workers' % processes)
     self._processes = []
@@ -95,21 +106,41 @@ class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
       request_queue.put(request, block=block)
 
   def get_experiences(self, block=True):
-    return self._experience_queue.get(block=block)
+    eps, exps = self._experience_queue.get(block=block)
+    if self._states_on_device:
+      exps = [e.to_device(self._device) for e in exps]
+    return eps, exps
 
   def update_exploration_rate(self, exploration_rate):
-    self._send_to_all(_RunGameRequest(set_exploration_rate=exploration_rate))
+    self._send_to_all(_RunGameRequest(set_exploration_rate=exploration_rate), block=True)
 
   def close(self):
-    print('* shutting down worker')
+    print('* shutting down workers')
     self._send_to_all(_RunGameRequest(do_terminate=True))
+    # wake the workers
+    try:
+      while not self._experience_queue.empty():
+        try:
+          self._experience_queue.get(block=False)
+        except queue.Empty:
+          pass
+    except ConnectionResetError:
+      pass
+    except FileNotFoundError:
+      pass
+
+    self._experience_queue.close()
     for p in self._processes:
-      p.join()
+      p.join(1000)
+    for q in self._request_queues:
+      q.close()
+    self._experience_queue.close()
 
 
 def create_async_game_executor(game_factory: GameFactory, network: nn.Module, device: torch.device,
-                               processes=0, steps_ahead=50, batch_size=1):
+                               processes=0, steps_ahead=50, batch_size=1, states_on_device=False):
   if processes == 0:
-    return NotAyncGameExecutor(game_factory, network, device, batch_size)
+    return NotAyncGameExecutor(game_factory, network, device, batch_size, states_on_device)
   else:
-    return MultiprocessAsyncGameExecutor(game_factory, network, device, processes, steps_ahead, batch_size)
+    return MultiprocessAsyncGameExecutor(game_factory, network, device, processes, steps_ahead, batch_size,
+                                         states_on_device)

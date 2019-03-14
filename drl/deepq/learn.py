@@ -22,22 +22,21 @@ def _state_from_experiences(exps: [Experience], before: bool):
   return state.reshape((count, -1, *frame_shape))
 
 
-def get_target_action_values(model: LearningModel, gamma: float, exps: [Experience]) -> Tensor:
-  """
-  :param gamma: discounting factor for future (next-step) rewards (e.g. 0.99)
-  :param exps: Experiences to calculate target action values for
-  """
-  non_final_mask = tensor(tuple(map(lambda e: not e.done, exps)), device=model.device, dtype=torch.uint8)
-  next_states = _state_from_experiences(exps, False).to(model.device, non_blocking=True)
-  next_state_values = torch.zeros(len(exps), device=model.device)
-  next_state_values[non_final_mask] = model.target_net(next_states).max(1)[0].detach()
+def get_target_action_values(model: LearningModel, timings: Timings, gamma: float, exps: [Experience]) -> Tensor:
+  with timings['      transfer target states']:
+    non_final_mask = tensor(tuple(map(lambda e: not e.done, exps)), device=model.device, dtype=torch.uint8)
+    next_states = _state_from_experiences(exps, False).to(model.device, non_blocking=True)
+    next_state_values = torch.zeros(len(exps), device=model.device)
 
-  lengths = tensor([e.state_difference_in_steps for e in exps]).to(model.device, non_blocking=True)
-  gammas = torch.pow(tensor(gamma).to(model.device, non_blocking=True), lengths.float()).detach()
+  with timings['      calculate Q next']:
+    next_state_values[non_final_mask] = model.target_net(next_states).max(1)[0].detach()
 
-  rewards = tensor([e.reward for e in exps], device=model.device)
-  target_action_values = (next_state_values * gammas) + rewards
-  return target_action_values.unsqueeze(1)
+  with timings['      calculate Q target']:
+    lengths = tensor([e.state_difference_in_steps for e in exps]).to(model.device, non_blocking=True)
+    gammas = torch.pow(tensor(gamma).to(model.device, non_blocking=True), lengths.float()).detach()
+    rewards = tensor([e.reward for e in exps], device=model.device)
+    target_action_values = (next_state_values * gammas) + rewards
+    return target_action_values.unsqueeze(1)
 
 
 def calculate_losses(model: LearningModel, timings: Timings, gamma: float, exps: [Experience]) -> Tensor:
@@ -48,14 +47,16 @@ def calculate_losses(model: LearningModel, timings: Timings, gamma: float, exps:
   :param exps: Experiences calculate losses for
   """
   with timings['    get target action value']:
-    target_action_values = get_target_action_values(model, gamma, exps).detach()
+    target_action_values = get_target_action_values(model, model.status.timings, gamma, exps).detach()
 
   with timings['    predicted action values']:
-    states = _state_from_experiences(exps, True). \
-      to(model.device, non_blocking=True)
-    actions = torch.stack([tensor([e.action.index]) for e in exps]).\
-      to(model.device, non_blocking=True)
-    predicted_action_values = model.policy_net(states).gather(1, actions)
+    with timings['      transfer states']:
+      states = _state_from_experiences(exps, True). \
+        to(model.device, non_blocking=True)
+      actions = torch.stack([tensor([e.action.index]) for e in exps]).\
+        to(model.device, non_blocking=True)
+    with timings['      run network']:
+      predicted_action_values = model.policy_net(states).gather(1, actions)
 
   return F.mse_loss(predicted_action_values, target_action_values, reduction='none')
 

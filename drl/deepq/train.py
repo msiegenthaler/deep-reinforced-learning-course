@@ -1,5 +1,4 @@
 import math
-import random
 from time import time
 from typing import NamedTuple, Callable
 
@@ -7,11 +6,10 @@ import numpy as np
 
 from drl.deepq.async_execution import AsyncGameExecutor, create_async_game_executor
 from drl.deepq.checkpoint import save_checkpoint
-from drl.deepq.execution import run_validation, play_example, GameExecutor, chose_action
+from drl.deepq.execution import run_validation, play_example, GameExecutor
 from drl.deepq.game import Game, GameFactory
 from drl.deepq.learn import learn_from_memory
 from drl.deepq.model import LearningModel, EpochTrainingLog, EpisodeLog
-from drl.deepq.multistep import create_experience_buffer
 from drl.utils.stats import FloatStatCollector
 from drl.utils.timings import Timings
 
@@ -56,35 +54,26 @@ class TrainingHyperparameters(NamedTuple):
   warmup_rounds: int = 0
 
   # Number of games to run in parallel (for faster experience gathering)
-  parallel_game_processes: int = 1
+  parallel_game_processes: int = 0
 
   # Max. number of minibatches to run in front of the neural net (delays effect on experiences)
-  max_batches_prefetch: int = 5
+  max_batches_prefetch: int = 3
+
+  # Store the states (frames) on the device (GPU). Activate where it fits, it provides a very good speedup
+  states_on_device: bool = False
 
 
-def _prefill_memory_random(model: LearningModel, game: Game, n: int):
-  """Fill the memory with n experiences"""
-  game.reset()
-  for i in range(n):
-    action = random.randrange(len(game.actions))
-    exp = game.step(game.actions[action])
-    model.memory.remember(exp)
-  game.close()
-
-
-def _play_and_remember_steps(model: LearningModel, game: Game, hyperparams: TrainingHyperparameters, steps: int):
-  exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)
-  state = game.reset().as_tensor()
-  experience_buffer = create_experience_buffer(hyperparams.multi_step_n, hyperparams.gamma)
-  with model.status.timings['play']:
-    for _ in range(steps):
-      with model.status.timings['forward action']:
-        action, best = chose_action(model.policy_net, model.device, state, exploration_rate)
-      with model.status.timings['game']:
-        exp = game.step(game.actions[action])
-      state = exp.state_after.as_tensor()
+def _play_and_remember_steps(model: LearningModel, game: AsyncGameExecutor,
+                             hyperparams: TrainingHyperparameters, steps: int, all_random=False):
+  expl_rate = hyperparams.exploration_rate(model.status.trained_for_epochs) if not all_random else 1.0
+  game.update_exploration_rate(expl_rate)
+  steps_remaining = steps
+  with model.status.timings['prefill memory']:
+    while steps_remaining > 0:
+      _, exps = game.get_experiences()
+      steps_remaining -= len(exps)
       with model.status.timings['remember']:
-        for e in experience_buffer.process(exp, best):
+        for e in exps:
           model.memory.remember(e)
 
 
@@ -185,26 +174,26 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
   print('Starting training for %d epochs a %d steps (with batch_size %d)' % (train_epochs,
                                                                              hyperparams.game_steps_per_epoch,
                                                                              hyperparams.batch_size))
-  if model.memory.size() < hyperparams.init_memory_steps:
-    print('- Prefilling memory with %d steps' % hyperparams.init_memory_steps)
-    with game_factory() as game:
-      if model.status.trained_for_epochs == 0:
-        _prefill_memory_random(model, game, hyperparams.init_memory_steps)
-        if hyperparams.warmup_rounds > 0:
-          print('- warming up the model')
-          _warm_up(model, hyperparams)
-      else:
-        _play_and_remember_steps(model, game, hyperparams, hyperparams.init_memory_steps)
-
-  validation_game = game_factory()
 
   def create_game_executor():
     return GameExecutor(game_factory(), Timings(), hyperparams.multi_step_n, hyperparams.gamma)
 
   train_game = create_async_game_executor(create_game_executor, model.policy_net, model.device,
                                           hyperparams.parallel_game_processes, hyperparams.max_batches_prefetch,
-                                          hyperparams.game_steps_per_step)
-  train_game.get_experiences()  # wait the games to start
+                                          batch_size=hyperparams.game_steps_per_step,
+                                          states_on_device=hyperparams.states_on_device)
+
+  if model.memory.size() < hyperparams.init_memory_steps:
+    print('- Prefilling memory with %d steps' % hyperparams.init_memory_steps)
+    first = model.status.trained_for_epochs == 0
+    _play_and_remember_steps(model, train_game, hyperparams, hyperparams.init_memory_steps, all_random=first)
+    if first and hyperparams.warmup_rounds > 0:
+      print('- warming up the model')
+      _warm_up(model, hyperparams)
+  else:
+    train_game.get_experiences()  # wait the games to start
+
+  validation_game = game_factory()
   for epoch in range(train_epochs):
     print('Epoch: %3d' % (model.status.trained_for_epochs + 1))
     exploration_rate = hyperparams.exploration_rate(model.status.trained_for_epochs)

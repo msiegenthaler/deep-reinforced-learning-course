@@ -11,9 +11,9 @@ from drl.deepq.game import Game, Action, State, Experience, Frames
 class OpenAIGame(Game, ABC):
   """OpenAI Gym game"""
 
-  def __init__(self, scenario: str, t: int, frame_store: torch.device):
+  def __init__(self, scenario: str, t: int):
     self.env = gym.make(scenario)
-    self.frames = Frames(t, frame_store)
+    self.frames = Frames(t)
 
   def reset(self) -> State:
     self._new_episode()

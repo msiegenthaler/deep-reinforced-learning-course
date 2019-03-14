@@ -13,9 +13,9 @@ class Pong(OpenAIGame):
   actions = [Action('up', 2, 0),
              Action('down', 3, 1)]
 
-  def __init__(self, x: int, y: int, t: int, frame_store: torch.device, skip=4):
+  def __init__(self, x: int, y: int, t: int, skip=4):
     self.transform = T.Compose([T.ToPILImage(), T.Resize((y, x)), T.Grayscale(), T.ToTensor()])
-    super().__init__('PongNoFrameskip-v4', t, frame_store)
+    super().__init__('PongNoFrameskip-v4', t)
     self.env = MaxAndSkipEnv(self.env, skip=skip)
 
   @property
