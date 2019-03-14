@@ -47,6 +47,44 @@ class DQN(nn.Module):
     return r
 
 
+class DQN_Pong(nn.Module):
+  def __init__(self, w: int, h: int, t: int, action_count: int):
+    """
+    :param w: width of the image
+    :param h: height of the image
+    :param t: number of images in the frame stack (temporal history)
+    :param action_count: number of actions/action combinations in the game
+    """
+    super(DQN_Pong, self).__init__()
+
+    self.conv = nn.Sequential(
+      nn.Conv2d(t, 32, kernel_size=8, stride=4),
+      nn.ReLU(),
+      nn.Conv2d(32, 64, kernel_size=4, stride=2),
+      nn.ReLU(),
+      nn.Conv2d(64, 64, kernel_size=3, stride=1),
+      nn.ReLU()
+    )
+
+    linear_in = self._get_conv_out([t, h, w])
+
+    self.action_count = action_count
+    self.linear = nn.Sequential(
+      nn.Linear(linear_in, 512),
+      nn.ReLU(),
+      nn.Linear(512, action_count))
+
+  def _get_conv_out(self, shape):
+    o = self.conv(torch.zeros(1, *shape))
+    return int(np.prod(o.size()))
+
+  def forward(self, state):
+    r = self.conv(state)
+    r = r.view(r.size(0), -1)
+    r = self.linear(r)
+    return r
+
+
 class DuelingDQN(nn.Module):
   def __init__(self, w: int, h: int, t: int, action_count: int):
     """
