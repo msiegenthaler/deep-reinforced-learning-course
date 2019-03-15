@@ -34,19 +34,40 @@ class EpisodeLog(NamedTuple):
 
 class TrainingStatus:
   def __init__(self):
-    self.training_log: [EpochTrainingLog] = []
-    self.training_episodes: [EpisodeLog] = []
-    self.validation_log: [ValidationLog] = []
+    self._training_epochs: [EpochTrainingLog] = []
+    self._training_episodes: [EpisodeLog] = []
+    self._validation_episodes: [ValidationLog] = []
     self.timings = Timings()
+
+  def epoch_trained(self, log: EpochTrainingLog):
+    self._training_epochs.append(log)
+
+  def episode_trained(self, log: EpisodeLog):
+    self._training_episodes.append(log)
+
+  def episode_validated(self, log: ValidationLog):
+    self._validation_episodes.append(log)
+
+  @property
+  def validation_episodes(self):
+    return self._validation_episodes
+
+  @property
+  def training_epochs(self):
+    return self._training_epochs
+
+  @property
+  def training_episodes(self):
+    return self._training_episodes
 
   @property
   def trained_for_epochs(self) -> int:
-    return len(self.training_log)
+    return len(self._training_epochs)
 
   @property
   def trained_for_steps(self) -> int:
-    return sum([l.game_steps for l in self.training_log])
+    return sum([l.game_steps for l in self._training_epochs])
 
   @property
   def trained_for_episodes(self) -> int:
-    return len(self.training_episodes)
+    return len(self._training_episodes)

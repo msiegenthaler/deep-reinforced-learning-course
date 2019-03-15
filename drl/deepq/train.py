@@ -123,7 +123,7 @@ def train_epoch(model: LearningModel, game: AsyncGameExecutor, hyperparams: Trai
         completed_episodes, experiences = game.get_experiences()
       for completed_episode in completed_episodes:
         episode_rewards.record(completed_episode.reward)
-        model.status.training_episodes.append(EpisodeLog(
+        model.status.episode_trained(EpisodeLog(
           at_training_epoch=model.status.trained_for_epochs + 1,
           at_training_step=model.status.trained_for_steps + step,
           reward=completed_episode.reward,
@@ -210,7 +210,7 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
 
     epoch_log = train_epoch(model, train_game, hyperparams, beta, exploration_rate)
 
-    model.status.training_log.append(epoch_log)
+    model.status.epoch_trained(epoch_log)
     log_training(model, epoch_log)
 
     if validation_episodes > 0:
@@ -257,7 +257,7 @@ def log_training(model: LearningModel, epoch_log: EpochTrainingLog) -> None:
 
 def print_validation(model: LearningModel, game: Game, episodes: int):
   log = run_validation(model.exec(), game, episodes)
-  model.status.validation_log.append(log)
+  model.status.episode_validated(log)
 
   actions = []
   for name, cnt in log.actions_taken.items():
