@@ -9,7 +9,8 @@ from drl.deepq.checkpoint import save_checkpoint
 from drl.deepq.execution import run_validation, play_example, GameExecutor
 from drl.deepq.game import Game, GameFactory
 from drl.deepq.learn import learn_from_memory
-from drl.deepq.model import LearningModel, EpochTrainingLog, EpisodeLog
+from drl.deepq.model import LearningModel
+from drl.deepq.status_log import EpochTrainingLog, EpisodeLog
 from drl.utils.stats import FloatStatCollector
 from drl.utils.timings import Timings
 
@@ -211,8 +212,6 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
 
     model.status.training_log.append(epoch_log)
     log_training(model, epoch_log)
-
-    print(model.status.timings)
 
     if validation_episodes > 0:
       print_validation(model, validation_game, validation_episodes)

@@ -8,7 +8,8 @@ import torch
 from torch import nn, Tensor
 
 from drl.deepq.game import Game, Experience
-from drl.deepq.model import ExecutionModel, ValidationLog
+from drl.deepq.model import ExecutionModel
+from drl.deepq.status_log import ValidationLog
 from drl.deepq.multistep import create_experience_buffer
 from drl.utils.stats import FloatStatCollector
 from drl.utils.timings import Timings
