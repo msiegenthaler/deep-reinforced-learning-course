@@ -235,7 +235,13 @@ def log_training(model: LearningModel, epoch_log: EpochTrainingLog) -> None:
     avg: float = np.mean([episode.reward for episode in model.status.training_episodes[-n:]])
     return avg
 
-  avgs = [5, 10, 25, 50, 100]
+  if model.status.trained_for_epochs > 0:
+    display_exp = math.floor(
+      math.log(float(model.status.trained_for_episodes) / model.status.trained_for_epochs, 10))
+  else:
+    display_exp = 0
+
+  avgs = np.array([5, 10, 25, 50, 100]) * 10 ** display_exp
   if epoch_log.episodes != 0:
     avgs_over = ['%6.2f (%d)' % (avg_over(n), n) for n in avgs]
     print(' - completed %3d episodes, reward: %5.1f (%4.0f to %4.0f)  => total %d episodes: %s' % (
