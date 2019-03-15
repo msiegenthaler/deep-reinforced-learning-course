@@ -4,7 +4,7 @@ from typing import NamedTuple, Callable
 
 import numpy as np
 
-from drl.deepq.async_execution import AsyncGameExecutor, create_async_game_executor
+from drl.deepq.async_execution import AsyncGameExecutor, create_async_game_executor, GameExecutorFactory
 from drl.deepq.checkpoint import save_checkpoint
 from drl.deepq.execution import run_validation, play_example, GameExecutor
 from drl.deepq.game import Game, GameFactory
@@ -158,6 +158,16 @@ def train_epoch(model: LearningModel, game: AsyncGameExecutor, hyperparams: Trai
   )
 
 
+class TrainingGameExecutorFactory(GameExecutorFactory):
+  def __init__(self, game_factory: GameFactory, hyperparams: TrainingHyperparameters):
+    self.game_factory = game_factory
+    self.multi_step_n = hyperparams.multi_step_n
+    self.gamma = hyperparams.gamma
+
+  def create(self):
+    return GameExecutor(self.game_factory(), Timings(), self.multi_step_n, self.gamma)
+
+
 def train(model: LearningModel, game_factory: GameFactory, hyperparams: TrainingHyperparameters, train_epochs,
           save_every=10, example_every=0, validation_episodes=0) -> None:
   """
@@ -174,11 +184,9 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
   print('Starting training for %d epochs a %d steps (with batch_size %d)' % (train_epochs,
                                                                              hyperparams.game_steps_per_epoch,
                                                                              hyperparams.batch_size))
-
-  def create_game_executor():
-    return GameExecutor(game_factory(), Timings(), hyperparams.multi_step_n, hyperparams.gamma)
-
-  train_game = create_async_game_executor(create_game_executor, model.policy_net, model.device,
+  gef = TrainingGameExecutorFactory(game_factory, hyperparams)
+  train_game = create_async_game_executor(gef,
+                                          model.policy_net, model.device,
                                           hyperparams.parallel_game_processes, hyperparams.max_batches_prefetch,
                                           batch_size=hyperparams.game_steps_per_step,
                                           states_on_device=hyperparams.states_on_device)

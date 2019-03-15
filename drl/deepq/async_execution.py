@@ -1,6 +1,6 @@
 import abc
 import queue
-from typing import NamedTuple, Callable
+from typing import NamedTuple
 
 import torch
 from torch import nn
@@ -30,13 +30,16 @@ class AsyncGameExecutor(abc.ABC):
     self.close()
 
 
-GameFactory = Callable[[], GameExecutor]
+class GameExecutorFactory(abc.ABC):
+  @abc.abstractmethod
+  def create(self) -> GameExecutor:
+    pass
 
 
 class NotAyncGameExecutor(AsyncGameExecutor):
-  def __init__(self, game_factory: GameFactory, network: nn.Module, device: torch.device, batch_size: int,
+  def __init__(self, game_factory: GameExecutorFactory, network: nn.Module, device: torch.device, batch_size: int,
                states_on_device: bool):
-    self._game: GameExecutor = game_factory()
+    self._game: GameExecutor = game_factory.create()
     self._network = network
     self._device = device
     self._batch_size = batch_size
@@ -61,9 +64,10 @@ class _RunGameRequest(NamedTuple):
   do_terminate: bool = False
 
 
-def _run_game(process_id: int, game: GameExecutor, network: nn.Module, device: torch.device,
+def _run_game(process_id: int, game_factory: GameExecutorFactory, network: nn.Module, device: torch.device,
               request_queue: Queue, experience_queue: Queue, batch_size: int) -> None:
   exploration_rate = 1.
+  game = game_factory.create()
   # we use this to hold past (in-the-queue) experiences in memory until they get garbage collected
   print('* worker %d started' % process_id)
   while True:
@@ -85,7 +89,7 @@ def _run_game(process_id: int, game: GameExecutor, network: nn.Module, device: t
 
 
 class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
-  def __init__(self, game_factory: GameFactory, network: nn.Module, device: torch.device,
+  def __init__(self, game_factory: GameExecutorFactory, network: nn.Module, device: torch.device,
                processes: int, steps_ahead: int, batch_size: int, states_on_device: bool):
     self._states_on_device = states_on_device
     self._device = device
@@ -95,7 +99,7 @@ class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
     self._request_queues = []
     for i in range(processes):
       request_queue = Queue(maxsize=10)
-      p = Process(target=_run_game, args=(i, game_factory(), network, device, request_queue,
+      p = Process(target=_run_game, args=(i, game_factory, network, device, request_queue,
                                           self._experience_queue, batch_size,))
       p.start()
       self._request_queues.append(request_queue)
@@ -137,7 +141,7 @@ class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
     self._experience_queue.close()
 
 
-def create_async_game_executor(game_factory: GameFactory, network: nn.Module, device: torch.device,
+def create_async_game_executor(game_factory: GameExecutorFactory, network: nn.Module, device: torch.device,
                                processes=0, steps_ahead=50, batch_size=1, states_on_device=False):
   if processes == 0:
     return NotAyncGameExecutor(game_factory, network, device, batch_size, states_on_device)
