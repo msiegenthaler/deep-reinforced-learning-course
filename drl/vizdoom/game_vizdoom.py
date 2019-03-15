@@ -23,6 +23,7 @@ class VizdoomGame(Game, ABC):
     game.load_config('data/vizdoom/%s.cfg' % scenario)
     game.set_doom_scenario_path('data/vizdoom/%s.wad' % scenario)
     game.set_window_visible(visible)
+    game.set_sound_enabled(False)
     game.init()
     return game
 
