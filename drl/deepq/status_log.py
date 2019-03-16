@@ -1,4 +1,7 @@
+import torch
 from typing import NamedTuple, Dict, Optional
+
+from torch import nn
 
 from drl.utils.stats import FloatStat
 from drl.utils.timings import Timings
@@ -69,6 +72,10 @@ class TrainingStatus:
       self._writer.add_scalar('validation_reward', log.episode_reward.mean, iteration)
       self._writer.add_scalar('validation_steps', log.steps, iteration)
       self._writer.add_scalar('validation_duration', log.duration_seconds, iteration)
+
+  def add_graph(self, module: nn.Module, input: torch.Tensor) -> None:
+    if self._writer is not None:
+      self._writer.add_graph(module, input)
 
   @property
   def validation_episodes(self):

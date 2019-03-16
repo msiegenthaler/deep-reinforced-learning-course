@@ -201,8 +201,9 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
     if first and hyperparams.warmup_rounds > 0:
       print('- warming up the model')
       _warm_up(model, hyperparams)
-  else:
-    train_game.get_experiences()  # wait the games to start
+
+  _, exps = train_game.get_experiences()
+  model.status.add_graph(model.policy_net, exps[0].state_before.as_tensor().unsqueeze(0))
 
   validation_game = game_factory()
   for epoch in range(train_epochs):
