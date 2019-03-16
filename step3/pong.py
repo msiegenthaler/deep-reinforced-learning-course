@@ -1,14 +1,12 @@
 # %%
-import multiprocessing
 
 import torch
 from torch.optim import Adam
 
 from drl.deepq.checkpoint import load_checkpoint, save_checkpoint
-from drl.deepq.execution import play_example
 from drl.deepq.learn import LearningModel
-from drl.deepq.networks import DuelingDQN, DQN_Pong
-from drl.deepq.replay_memory import PrioritizedReplayMemory, SimpleReplayMemory
+from drl.deepq.networks import DuelingDQN
+from drl.deepq.replay_memory import SimpleReplayMemory
 from drl.deepq.train import TrainingHyperparameters, linear_increase, linear_decay, train, print_validation
 from drl.openai.pong import Pong
 
@@ -47,8 +45,6 @@ if __name__ == '__main__':
   with create_game() as _game:
     # memory = PrioritizedReplayMemory(memory_size)
     memory = SimpleReplayMemory(memory_size)
-    # policy_net = DQN_Pong(w, h, t, len(_game.actions)).to(device)
-    # target_net = DQN_Pong(w, h, t, len(_game.actions)).to(device)
     policy_net = DuelingDQN(w, h, t, len(_game.actions)).to(device)
     target_net = DuelingDQN(w, h, t, len(_game.actions)).to(device)
 

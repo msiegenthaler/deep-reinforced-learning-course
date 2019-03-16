@@ -9,7 +9,9 @@ from drl.deepq.replay_memory import PrioritizedReplayMemory
 from drl.deepq.train import TrainingHyperparameters, linear_increase, linear_decay, train, print_validation
 from drl.vizdoom.vizdoom_basic import VizdoomBasicGame
 
-episode_factor = 2
+steps_to_train = 200000
+
+episode_factor = 5
 w = h = 86
 t = 4
 memory_size = 40000
@@ -66,13 +68,15 @@ if __name__ == '__main__':
     print('Starting fresh')
 
   # %%
-  # train(model, create_game, hyperparams, 200 // episode_factor, save_every=25 // episode_factor)
-  # save_checkpoint(model)
+  if steps_to_train > 0:
+    train(model, create_game, hyperparams, steps_to_train // episode_factor,
+          save_every=25 // episode_factor, validation_episodes=5)
+    save_checkpoint(model)
 
   with create_game() as game:
     print('Running validation')
-    print_validation(model, game, 50)
-    print('Playing example')
+    print_validation(model, game, 30)
+    # print('Playing example')
     # play_example(model.exec(), game, 'final')
 
   print('Done.')
