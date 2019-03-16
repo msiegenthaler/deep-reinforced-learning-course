@@ -203,7 +203,7 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
       _warm_up(model, hyperparams)
 
   _, exps = train_game.get_experiences()
-  model.status.add_graph(model.policy_net, exps[0].state_before.as_tensor().unsqueeze(0))
+  model.status.add_graph(model.policy_net, exps[0].state_before.as_tensor().unsqueeze(0).to(model.device))
 
   validation_game = game_factory()
   for epoch in range(train_epochs):
