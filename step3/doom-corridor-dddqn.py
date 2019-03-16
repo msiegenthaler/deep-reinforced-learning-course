@@ -1,17 +1,23 @@
 # %%
+import datetime
+
 import torch
+from tensorboardX import SummaryWriter
 from torch.optim import Adam
 
 from drl.deepq.checkpoint import load_checkpoint, save_checkpoint
 from drl.deepq.execution import play_example
 from drl.deepq.model import LearningModel
-from drl.deepq.networks import DuelingDQN
+from drl.deepq.networks import DuelingDQN, DuelingDQN_RBP
 from drl.deepq.replay_memory import PrioritizedReplayMemory
+from drl.deepq.status_log import TrainingStatus
 from drl.deepq.train import TrainingHyperparameters, linear_increase, linear_decay, print_validation, train
 from drl.vizdoom.vizdoom_corridor import VizdoomCorridorGame
 
-episode_factor = 2
-w = h = 86
+steps_to_train = 500000
+
+episode_factor = 5
+w = h = 84
 t = 4
 memory_size = 40000
 game_steps_per_step = 8
@@ -45,18 +51,21 @@ if __name__ == '__main__':
   print('Using device %s' % device)
 
   with create_game() as game:
+    strategy_name = 'pdddqn_rbp'
     memory = PrioritizedReplayMemory(memory_size)
-    policy_net = DuelingDQN(w, h, t, len(game.actions)).to(device)
-    target_net = DuelingDQN(w, h, t, len(game.actions)).to(device)
+    policy_net = DuelingDQN_RBP(w, h, t, len(game.actions)).to(device)
+    target_net = DuelingDQN_RBP(w, h, t, len(game.actions)).to(device)
 
+    summary_writer = SummaryWriter('runs/%s-%s-%s' % (game.name, strategy_name, datetime.datetime.now().isoformat()))
     model = LearningModel(
       memory=memory,
       policy_net=policy_net,
-      target_net=DuelingDQN(w, h, t, len(game.actions)).to(device),
+      target_net=target_net,
       optimizer=Adam(policy_net.parameters(), lr=1e-4),
-      strategy_name='pdddqn',
+      strategy_name=strategy_name,
       game_name=game.name,
-      device=device
+      device=device,
+      status=TrainingStatus(summary_writer)
     )
   print('Model prepared')
 
@@ -67,14 +76,16 @@ if __name__ == '__main__':
     print('Starting fresh')
 
   # %%
-  train(model, create_game, hyperparams, 1000 // episode_factor, save_every=25 // episode_factor)
+  train(model, create_game, hyperparams, steps_to_train // hyperparams.game_steps_per_step,
+        save_every=25 // episode_factor,
+        validation_episodes=5)
   save_checkpoint(model)
 
   with create_game() as game:
     print('Running validation')
-    print_validation(model, game, 50)
+    print_validation(model, game, 10)
     print('Playing example')
-    for i in range(10):
+    for i in range(3):
       play_example(model.exec(), game, '%04d' % i)
 
   print('Done.')
