@@ -1,4 +1,6 @@
 import abc
+from typing import Optional
+
 import torch
 from abc import ABC
 
@@ -11,9 +13,9 @@ from drl.deepq.game import Game, Action, State, Experience, Frames
 class OpenAIGame(Game, ABC):
   """OpenAI Gym game"""
 
-  def __init__(self, scenario: str, t: int):
+  def __init__(self, scenario: str, t: int, store_frames_as: torch.dtype, scale: Optional[float]):
     self.env = gym.make(scenario)
-    self.frames = Frames(t)
+    self.frames = Frames(t, store_frames_as, scale)
 
   def reset(self) -> State:
     self._new_episode()

@@ -9,8 +9,8 @@ from torch import nn, Tensor
 
 from drl.deepq.game import Game, Experience
 from drl.deepq.model import ExecutionModel
-from drl.deepq.status_log import ValidationLog
 from drl.deepq.multistep import create_experience_buffer
+from drl.deepq.status_log import ValidationLog
 from drl.utils.stats import FloatStatCollector
 from drl.utils.timings import Timings
 
@@ -50,13 +50,14 @@ class EpisodeCompleted(NamedTuple):
 
 
 class GameExecutor:
-  def __init__(self, game: Game, timings: Timings, multi_step_n: int, gamma: float):
+  def __init__(self, game: Game, input_dtype: torch.dtype, timings: Timings, multi_step_n: int, gamma: float):
     self.game = game
+    self.input_dtype = input_dtype
     self.timings = timings
     self.experience_buffer = create_experience_buffer(multi_step_n, gamma)
     self.episode_steps = 0
     self.episode_reward = 0.
-    self.state = self.game.reset().as_tensor()
+    self.state = self.game.reset().as_tensor(dtype=input_dtype)
 
   def step(self, network: nn.Module, device: torch.device,
            exploration_rate: float) -> (Optional[EpisodeCompleted], [Experience]):
@@ -64,7 +65,7 @@ class GameExecutor:
       action = chose_action(network, device, self.state, exploration_rate)
     with self.timings['  game']:
       exp = self.game.step(self.game.actions[action.action_index])
-      self.state = exp.state_after.as_tensor()
+      self.state = exp.state_after.as_tensor(device=device, dtype=self.input_dtype)
       self.episode_steps += 1
       self.episode_reward += exp.reward
       if exp.done:

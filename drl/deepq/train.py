@@ -1,4 +1,5 @@
 import math
+import torch
 from time import time
 from typing import NamedTuple, Callable
 
@@ -85,11 +86,11 @@ def _warm_up(model: LearningModel, params: TrainingHyperparameters) -> None:
   for r in range(params.warmup_rounds // 2):
     loss = learn_from_memory(model, 8, params.gamma, params.beta(0))
     if math.isnan(loss) or math.isinf(loss):
-      raise ValueError('infinite loss after part 1 round %d' % r)
+      raise ValueError('infinite/nan loss after part 1 round %d' % r)
   for r in range(params.warmup_rounds // 2):
     loss = learn_from_memory(model, 16, params.gamma, params.beta(0))
     if math.isnan(loss) or math.isinf(loss):
-      raise ValueError('infinite loss after part 2 round %d' % r)
+      raise ValueError('infinite/nan loss after part 2 round %d' % r)
 
 
 class EpisodeTracker:
@@ -160,13 +161,14 @@ def train_epoch(model: LearningModel, game: AsyncGameExecutor, hyperparams: Trai
 
 
 class TrainingGameExecutorFactory(GameExecutorFactory):
-  def __init__(self, game_factory: GameFactory, hyperparams: TrainingHyperparameters):
+  def __init__(self, game_factory: GameFactory, input_dtype: torch.dtype, hyperparams: TrainingHyperparameters):
     self.game_factory = game_factory
     self.multi_step_n = hyperparams.multi_step_n
     self.gamma = hyperparams.gamma
+    self.input_dtype = input_dtype
 
   def create(self):
-    return GameExecutor(self.game_factory(), Timings(), self.multi_step_n, self.gamma)
+    return GameExecutor(self.game_factory(), self.input_dtype, Timings(), self.multi_step_n, self.gamma)
 
 
 def train(model: LearningModel, game_factory: GameFactory, hyperparams: TrainingHyperparameters, train_epochs,
@@ -185,7 +187,7 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
   print('Starting training for %d epochs a %d steps (with batch_size %d)' % (train_epochs,
                                                                              hyperparams.game_steps_per_epoch,
                                                                              hyperparams.batch_size))
-  gef = TrainingGameExecutorFactory(game_factory, hyperparams)
+  gef = TrainingGameExecutorFactory(game_factory, model.input_dtype, hyperparams)
   train_game = create_async_game_executor(gef,
                                           model.policy_net, model.device,
                                           hyperparams.parallel_game_processes, hyperparams.max_batches_prefetch,

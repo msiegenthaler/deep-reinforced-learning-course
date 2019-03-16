@@ -139,6 +139,7 @@ class DuelingDQN(nn.Module):
 
 class DuelingDQN_RBP(nn.Module):
   """Dueling DQN as in the rainbow paper"""
+
   def __init__(self, w: int, h: int, t: int, action_count: int):
     """
     :param w: width of the image

@@ -13,9 +13,12 @@ class Pong(OpenAIGame):
   actions = [Action('up', 2, 0),
              Action('down', 3, 1)]
 
-  def __init__(self, x: int, y: int, t: int, skip=4):
+  def __init__(self, x: int, y: int, t: int, skip=4,
+               store_frames_as: torch.dtype = torch.float, force_scale_01: bool = False):
     self.transform = T.Compose([T.ToPILImage(), T.Resize((y, x)), T.Grayscale(), T.ToTensor()])
-    super().__init__('PongNoFrameskip-v4', t)
+    self.scale = 255 if not store_frames_as.is_floating_point else None
+    scale2 = 255 if not store_frames_as.is_floating_point and force_scale_01 else None
+    super().__init__('PongNoFrameskip-v4', t, store_frames_as, scale2)
     self.env = MaxAndSkipEnv(self.env, skip=skip)
 
   @property
@@ -25,6 +28,8 @@ class Pong(OpenAIGame):
   def _get_frame(self, env_state):
     raw = env_state[..., :3]
     image = self.transform(raw)
+    if self.scale is not None:
+      image = image * self.scale
     return image.squeeze(0)
 
 

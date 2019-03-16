@@ -74,7 +74,7 @@ if __name__ == '__main__':
     print('Starting fresh')
 
   # %%
-  train(model, create_game, hyperparams, steps_to_train // hyperparams.game_steps_per_step,
+  train(model, create_game, hyperparams, steps_to_train // hyperparams.game_steps_per_epoch,
         save_every=25 // episode_factor)
   save_checkpoint(model)
 

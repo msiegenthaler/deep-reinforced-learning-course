@@ -19,6 +19,7 @@ class ExecutionModel(NamedTuple):
 class LearningModel(NamedTuple):
   policy_net: nn.Module
   target_net: nn.Module  # for double dq
+  input_dtype: torch.dtype
   optimizer: Optimizer
   memory: ReplayMemory
   device: torch.device  # Device to train on
