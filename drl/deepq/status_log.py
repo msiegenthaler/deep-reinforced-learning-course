@@ -48,6 +48,7 @@ class TrainingStatus:
       self._writer.add_scalar('epoch_reward', log.episode_reward.mean, iteration)
       self._writer.add_scalar('epoch_steps', log.game_steps, iteration)
       self._writer.add_scalar('epoch_duration', log.duration_seconds, iteration)
+      self._writer.add_scalar('episodes_per_epoch', log.episodes, iteration)
       self._writer.add_scalar('loss', log.loss.mean, iteration)
       self._writer.add_scalar('speed', log.game_steps / log.duration_seconds, iteration)
       self._writer.add_scalar('beta', log.parameter_values['beta'], iteration)
