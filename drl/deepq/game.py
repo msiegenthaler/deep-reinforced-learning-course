@@ -24,6 +24,10 @@ class State(NamedTuple):
     """Combined tensor of the complete state"""
     if self.on_device is not None:
       tensor = self.on_device.reshape(-1, *self.frames[0].shape)
+    elif dtype == torch.half:
+      # cat/stack on cpu not supported...
+      frames = [f.to(device, non_blocking=True) for f in self.frames]
+      tensor = torch.stack(tuple(frames))
     else:
       tensor = torch.stack(tuple(self.frames))
     tensor = tensor.to(device=device, dtype=dtype, non_blocking=True)
@@ -35,7 +39,7 @@ class State(NamedTuple):
     if self.on_device:
       return
     frames = [f.to(device, non_blocking=True) for f in self.frames]
-    t = torch.cat(tuple(frames)).to(device, non_blocking=True)
+    t = torch.cat(tuple(frames))
     return State(self.frames, self.scale, t)
 
 

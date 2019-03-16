@@ -83,7 +83,6 @@ def learn_from_memory(model: LearningModel, batch_size: int, gamma: float, beta:
 
   with model.status.timings['  backprop loss']:
     model.optimizer.zero_grad()
-
     loss.backward()
 
     model.optimizer.step()

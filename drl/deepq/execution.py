@@ -57,10 +57,13 @@ class GameExecutor:
     self.experience_buffer = create_experience_buffer(multi_step_n, gamma)
     self.episode_steps = 0
     self.episode_reward = 0.
-    self.state = self.game.reset().as_tensor(dtype=input_dtype)
+    self.state = None
+    game.reset()
 
   def step(self, network: nn.Module, device: torch.device,
            exploration_rate: float) -> (Optional[EpisodeCompleted], [Experience]):
+    if self.state is None:
+      self.state = self.game.current_state().as_tensor(dtype=self.input_dtype, device=device)
     with self.timings['  forward action']:
       action = chose_action(network, device, self.state, exploration_rate)
     with self.timings['  game']:
