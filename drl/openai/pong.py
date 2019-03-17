@@ -37,7 +37,7 @@ class Pong30Min(OpenAIGame):
   actions = [Action('up', 2, 0),
              Action('down', 3, 1)]
 
-  def __init__(self, x: int, y: int, store_frames_as: torch.dtype = torch.float):
+  def __init__(self, store_frames_as: torch.dtype = torch.float):
     super().__init__('PongNoFrameskip-v4', 4, store_frames_as, None)
     env = self.env
     env = NoopResetEnv(env, noop_max=30)
