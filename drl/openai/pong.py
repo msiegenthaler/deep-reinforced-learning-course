@@ -37,8 +37,8 @@ class Pong30Min(OpenAIGame):
   actions = [Action('up', 2, 0),
              Action('down', 3, 1)]
 
-  def __init__(self, x: int, y: int):
-    super().__init__('PongNoFrameskip-v4', 4)
+  def __init__(self, x: int, y: int, store_frames_as: torch.dtype = torch.float):
+    super().__init__('PongNoFrameskip-v4', 4, store_frames_as, None)
     env = self.env
     env = NoopResetEnv(env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=4)
@@ -54,7 +54,7 @@ class Pong30Min(OpenAIGame):
     return 'pong'
 
   def _get_frame(self, env_state):
-    return torch.tensor(env_state).squeeze(0).float() / 255.
+    return torch.tensor(env_state).squeeze(0).float()
 
 
 class ProcessFrame84(gym.ObservationWrapper):
