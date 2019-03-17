@@ -217,6 +217,9 @@ def train(model: LearningModel, game_factory: GameFactory, hyperparams: Training
     model.status.epoch_trained(epoch_log)
     log_training(model, epoch_log)
 
+    print(model.status.timings)
+    print()
+
     if validation_episodes > 0:
       print_validation(model, validation_game, validation_episodes)
 

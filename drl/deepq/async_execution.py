@@ -65,10 +65,10 @@ class _RunGameRequest(NamedTuple):
 
 
 def _run_game(process_id: int, game_factory: GameExecutorFactory, network: nn.Module, device: torch.device,
-              request_queue: Queue, experience_queue: Queue, batch_size: int, transfer: bool) -> None:
+              request_queue: Queue, experience_queue: Queue, batch_size: int, transfer_blocks: int,
+              transfer_to_device: bool) -> None:
   exploration_rate = 1.
   game = game_factory.create()
-  # we use this to hold past (in-the-queue) experiences in memory until they get garbage collected
   print('* worker %d started' % process_id)
   while True:
     try:
@@ -82,28 +82,33 @@ def _run_game(process_id: int, game_factory: GameExecutorFactory, network: nn.Mo
         if request.set_exploration_rate is not None:
           exploration_rate = request.set_exploration_rate
 
-      eps, exps = game.multi_step(network, device, exploration_rate, batch_size)
-      if transfer:
-        exps = [e.to_device(device, non_blocking=False) for e in exps]
-      experience_queue.put((eps, exps), block=True)
+      block = []
+      for _ in range(transfer_blocks):
+        eps, exps = game.multi_step(network, device, exploration_rate, batch_size)
+        if transfer_to_device:
+          exps = [e.to_device(device, non_blocking=False) for e in exps]
+        block.append((eps, exps))
+      experience_queue.put(block, block=True)
     except Exception as e:
       print('error in worker %d: ' % process_id, e)
 
 
 class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
   def __init__(self, game_factory: GameExecutorFactory, network: nn.Module, device: torch.device,
-               processes: int, steps_ahead: int, batch_size: int, states_on_device: bool):
+               processes: int, batches_ahead: int, batch_size: int, states_on_device: bool):
     self._states_on_device = states_on_device
     self._device = device
-    self._experience_queue = Queue(maxsize=steps_ahead)
-    print('* starting %d workers' % processes)
+    self._experience_queue = Queue(maxsize=processes + 1)
+    block_size = max(1, batches_ahead - processes)
+    self.block_buffer = []
+    print('* starting %d workers (batch size: %d, block size: %d)' % (processes, batch_size, block_size))
     self._processes = []
     self._request_queues = []
     for i in range(processes):
       request_queue = Queue(maxsize=10)
       # Transfer to GPU in the other process does not work.. it does not throw an error, but training does not converge
       p = Process(target=_run_game, args=(i, game_factory, network, device, request_queue,
-                                          self._experience_queue, batch_size, False,))
+                                          self._experience_queue, batch_size, block_size, False,))
       p.start()
       self._request_queues.append(request_queue)
       self._processes.append(p)
@@ -112,10 +117,13 @@ class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
     for request_queue in self._request_queues:
       request_queue.put(request, block=block)
 
-  def get_experiences(self, block=True):
-    eps, exps = self._experience_queue.get(block=block)
-    exps = [e.to_device(self._device) for e in exps]
-    return eps, exps
+  def get_experiences(self):
+    if len(self.block_buffer) == 0:
+      block_buffer = self._experience_queue.get(block=True)
+      for eps, exps in block_buffer:
+        exps = [e.to_device(self._device) for e in exps]
+        self.block_buffer.append((eps, exps))
+    return self.block_buffer.pop()
 
   def update_exploration_rate(self, exploration_rate):
     self._send_to_all(_RunGameRequest(set_exploration_rate=exploration_rate), block=True)
