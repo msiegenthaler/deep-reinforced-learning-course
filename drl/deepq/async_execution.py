@@ -101,8 +101,9 @@ class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
     self._request_queues = []
     for i in range(processes):
       request_queue = Queue(maxsize=10)
+      # Transfer to GPU in the other process does not work.. it does not throw an error, but training does not converge
       p = Process(target=_run_game, args=(i, game_factory, network, device, request_queue,
-                                          self._experience_queue, batch_size, states_on_device,))
+                                          self._experience_queue, batch_size, False,))
       p.start()
       self._request_queues.append(request_queue)
       self._processes.append(p)
@@ -113,6 +114,7 @@ class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
 
   def get_experiences(self, block=True):
     eps, exps = self._experience_queue.get(block=block)
+    exps = [e.to_device(self._device) for e in exps]
     return eps, exps
 
   def update_exploration_rate(self, exploration_rate):
