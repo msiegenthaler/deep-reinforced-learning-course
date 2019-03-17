@@ -57,8 +57,8 @@ class GameExecutor:
     self.experience_buffer = create_experience_buffer(multi_step_n, gamma)
     self.episode_steps = 0
     self.episode_reward = 0.
+    self.game.reset()
     self.state = None
-    game.reset()
 
   def step(self, network: nn.Module, device: torch.device,
            exploration_rate: float) -> (Optional[EpisodeCompleted], [Experience]):

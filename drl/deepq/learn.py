@@ -9,17 +9,12 @@ from drl.utils.timings import Timings
 
 def _state_from_experiences(exps: [Experience], before: bool, dtype: torch.dtype, device: torch.device):
   frames = []
-  frame_shape = exps[0].state_before.frames[0].shape
-  count = 0
   for e in exps:
     if before:
-      count += 1
-      frames.extend(e.state_before.as_tensor(dtype, device))
+      frames.append(e.state_before.as_tensor(dtype, device))
     elif not e.done:
-      count += 1
-      frames.extend(e.state_after.as_tensor(dtype, device))
-  state = torch.cat(tuple(frames))
-  return state.reshape((count, -1, *frame_shape))
+      frames.append(e.state_after.as_tensor(dtype, device))
+  return torch.stack(tuple(frames))
 
 
 def get_target_action_values(model: LearningModel, timings: Timings, gamma: float, exps: [Experience]) -> Tensor:

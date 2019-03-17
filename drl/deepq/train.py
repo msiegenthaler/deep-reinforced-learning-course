@@ -118,6 +118,7 @@ def train_epoch(model: LearningModel, game: AsyncGameExecutor, hyperparams: Trai
   total_loss = FloatStatCollector()
   steps = math.ceil(hyperparams.game_steps_per_epoch // hyperparams.game_steps_per_step)
   game.update_exploration_rate(exploration_rate)
+
   with model.status.timings['epoch']:
     for step in range(steps):
       with model.status.timings['wait_for_game']:

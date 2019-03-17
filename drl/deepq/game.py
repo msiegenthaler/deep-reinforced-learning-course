@@ -11,36 +11,39 @@ class Action(NamedTuple):
   index: int
 
 
-class State(NamedTuple):
-  """
-  Much more memory efficient than stacking upfront.
-  This way each frame is only held in memory once but used in mutiple states
-  """
-  frames: List[torch.Tensor]
-  scale: Optional[float]
-  on_device: Optional[torch.Tensor] = None
+class State():
+  def __init__(self, frames: List[torch.Tensor], scale_to_apply: Optional[float] = None):
+    self._frame_shape = frames[0].shape
+    self._scale_to_apply = scale_to_apply
+    self._frames: Optional[List[torch.Tensor]] = frames
+    self._on_device: Optional[torch.Tensor] = None
 
   def as_tensor(self, dtype: torch.dtype = torch.float, device: Optional[torch.device] = None) -> torch.Tensor:
     """Combined tensor of the complete state"""
-    if self.on_device is not None:
-      tensor = self.on_device.reshape(-1, *self.frames[0].shape)
-    elif dtype == torch.half:
-      # cat/stack on cpu not supported...
-      frames = [f.to(device, non_blocking=True) for f in self.frames]
-      tensor = torch.stack(tuple(frames))
+    if self._on_device is not None:
+      return self._on_device
     else:
-      tensor = torch.stack(tuple(self.frames))
-    tensor = tensor.to(device=device, dtype=dtype, non_blocking=True)
-    if self.scale is not None:
-      tensor = tensor * self.scale
-    return tensor
+      if dtype == torch.half:
+        # cat/stack on cpu not supported, so move to device fist
+        frames = [f.to(device, non_blocking=True) for f in self.frames]
+      else:
+        frames = self._frames
+      tensor = torch.stack(tuple(frames))
+      tensor = tensor.to(device=device, dtype=dtype, non_blocking=True)
+      if self._scale_to_apply is not None:
+        tensor = tensor * self._scale_to_apply
+      return tensor
 
-  def to_device(self, device):
-    if self.on_device:
-      return
-    frames = [f.to(device, non_blocking=True) for f in self.frames]
-    t = torch.cat(tuple(frames))
-    return State(self.frames, self.scale, t)
+  def to_device(self, device, non_blocking=True):
+    if self._on_device is not None:
+      return self
+    frames = [f.to(device, non_blocking=non_blocking) for f in self._frames]
+    tensor = torch.stack(tuple(frames))
+    if self._scale_to_apply is not None:
+      tensor = tensor * self._scale_to_apply
+    self._on_device = tensor
+    self._frames = None
+    return self
 
 
 class Experience(NamedTuple):
@@ -51,9 +54,9 @@ class Experience(NamedTuple):
   done: bool
   state_difference_in_steps: int = 1  # number of steps between state_before and state_after
 
-  def to_device(self, device: torch.device):
-    return self._replace(state_before=self.state_before.to_device(device),
-                         state_after=self.state_after.to_device(device))
+  def to_device(self, device: torch.device, non_blocking=True):
+    return self._replace(state_before=self.state_before.to_device(device, non_blocking=non_blocking),
+                         state_after=self.state_after.to_device(device, non_blocking=non_blocking))
 
 
 class Game(abc.ABC):
@@ -125,4 +128,4 @@ class Frames:
 
   def state(self) -> State:
     scale = 1. / self.scale if self.scale is not None else None
-    return State(frames=[t for t in self.deque], scale=scale)
+    return State(frames=[t for t in self.deque], scale_to_apply=scale)
