@@ -253,10 +253,10 @@ def log_training(model: LearningModel, epoch_log: EpochTrainingLog) -> None:
       model.status.trained_for_episodes, ', '.join(avgs_over)))
   else:
     print(' - completed   0 episodes in %6d steps' % epoch_log.game_steps)
-  print(' - expl: %4.2f beta %4.2f    loss: %4.2f    %4.1f step/s (%4.0fs)   %6d steps total' % (
+  print(' - expl: %4.2f beta %4.2f    loss: %4.2f    %4.1f step/s (%4.0fs)   %6d steps total (%5d s)' % (
     epoch_log.parameter_values['exploration_rate'], epoch_log.parameter_values['beta'],
     epoch_log.loss.mean, epoch_log.game_steps / epoch_log.duration_seconds, epoch_log.duration_seconds,
-    model.status.trained_for_steps))
+    model.status.trained_for_steps, model.status.total_duration))
 
 
 def print_validation(model: LearningModel, game: Game, episodes: int):

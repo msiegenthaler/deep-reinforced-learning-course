@@ -94,6 +94,10 @@ class TrainingStatus:
     return len(self._training_epochs)
 
   @property
+  def total_duration(self) -> int:
+    return sum([l.duration_seconds for l in self._training_epochs])
+
+  @property
   def trained_for_steps(self) -> int:
     return sum([l.game_steps for l in self._training_epochs])
 
