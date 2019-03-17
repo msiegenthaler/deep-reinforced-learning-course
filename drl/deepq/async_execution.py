@@ -65,7 +65,7 @@ class _RunGameRequest(NamedTuple):
 
 
 def _run_game(process_id: int, game_factory: GameExecutorFactory, network: nn.Module, device: torch.device,
-              request_queue: Queue, experience_queue: Queue, batch_size: int) -> None:
+              request_queue: Queue, experience_queue: Queue, batch_size: int, transfer: bool) -> None:
   exploration_rate = 1.
   game = game_factory.create()
   # we use this to hold past (in-the-queue) experiences in memory until they get garbage collected
@@ -82,8 +82,10 @@ def _run_game(process_id: int, game_factory: GameExecutorFactory, network: nn.Mo
         if request.set_exploration_rate is not None:
           exploration_rate = request.set_exploration_rate
 
-      response = game.multi_step(network, device, exploration_rate, batch_size)
-      experience_queue.put(response, block=True)
+      eps, exps = game.multi_step(network, device, exploration_rate, batch_size)
+      if transfer:
+        exps = [e.to_device(device, non_blocking=False) for e in exps]
+      experience_queue.put((eps, exps), block=True)
     except Exception as e:
       print('error in worker %d: ' % process_id, e)
 
@@ -100,7 +102,7 @@ class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
     for i in range(processes):
       request_queue = Queue(maxsize=10)
       p = Process(target=_run_game, args=(i, game_factory, network, device, request_queue,
-                                          self._experience_queue, batch_size,))
+                                          self._experience_queue, batch_size, states_on_device,))
       p.start()
       self._request_queues.append(request_queue)
       self._processes.append(p)
@@ -111,8 +113,6 @@ class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
 
   def get_experiences(self, block=True):
     eps, exps = self._experience_queue.get(block=block)
-    if self._states_on_device:
-      exps = [e.to_device(self._device) for e in exps]
     return eps, exps
 
   def update_exploration_rate(self, exploration_rate):
