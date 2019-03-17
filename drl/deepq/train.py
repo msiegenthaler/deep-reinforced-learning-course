@@ -239,8 +239,8 @@ def log_training(model: LearningModel, epoch_log: EpochTrainingLog) -> None:
     return avg
 
   if model.status.trained_for_epochs > 0 and model.status.trained_for_episodes > 0:
-    display_exp = math.floor(
-      math.log(float(model.status.trained_for_episodes) / model.status.trained_for_epochs, 10))
+    display_exp = max(0, math.floor(
+      math.log(float(model.status.trained_for_episodes) / model.status.trained_for_epochs, 10)))
   else:
     display_exp = 0
 
