@@ -120,9 +120,12 @@ class MultiprocessAsyncGameExecutor(AsyncGameExecutor):
   def get_experiences(self):
     if len(self.block_buffer) == 0:
       block_buffer = self._experience_queue.get(block=True)
-      for eps, exps in block_buffer:
-        exps = [e.to_device(self._device) for e in exps]
-        self.block_buffer.append((eps, exps))
+      if self._states_on_device:
+        for eps, exps in block_buffer:
+          exps = [e.to_device(self._device) for e in exps]
+          self.block_buffer.append((eps, exps))
+      else:
+        self.block_buffer.extend(block_buffer)
     return self.block_buffer.pop()
 
   def update_exploration_rate(self, exploration_rate):
