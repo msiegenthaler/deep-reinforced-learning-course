@@ -18,8 +18,8 @@ def create_game():
   return Pong30Min(torch.float)
 
 
-def train_with(device: torch.device,
-               steps_to_train: int, game_steps_per_step: int, prio_memory: bool):
+def train_with(device: torch.device, steps_to_train: int,
+               game_steps_per_step: int, prio_memory: bool):
   episode_factor = 5
   w = h = 84
   t = 4
@@ -81,7 +81,6 @@ if __name__ == '__main__':
 
   device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
   print('Using device %s' % device)
-
 
   steps = 500000
   game_steps = [1, 2, 4, 8, 16, 32]
