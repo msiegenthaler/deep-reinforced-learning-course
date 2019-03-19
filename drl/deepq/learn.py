@@ -17,41 +17,34 @@ def _state_from_experiences(exps: [Experience], before: bool, dtype: torch.dtype
   return torch.stack(tuple(frames))
 
 
-def get_target_action_values(model: LearningModel, timings: Timings, gamma: float, exps: [Experience]) -> Tensor:
-  with timings['      transfer target states']:
-    non_final_mask = tensor(tuple(map(lambda e: not e.done, exps)), device=model.device, dtype=torch.uint8)
-    next_states = _state_from_experiences(exps, False, dtype=model.input_dtype, device=model.device). \
-      to(model.device, non_blocking=True)
-    next_state_values = torch.zeros(len(exps), dtype=next_states.dtype, device=model.device)
+def get_target_action_values(model: LearningModel, gamma: float, exps: [Experience]) -> Tensor:
+  non_final_mask = tensor(tuple(map(lambda e: not e.done, exps)), device=model.device, dtype=torch.uint8)
+  next_states = _state_from_experiences(exps, False, dtype=model.input_dtype, device=model.device). \
+    to(model.device, non_blocking=True)
+  next_state_values = torch.zeros(len(exps), dtype=next_states.dtype, device=model.device)
 
-  with timings['      calculate Q next']:
-    next_state_values[non_final_mask] = model.target_net(next_states).max(1)[0].detach()
+  next_state_values[non_final_mask] = model.target_net(next_states).max(1)[0].detach()
 
-  with timings['      calculate Q target']:
-    lengths = tensor([e.state_difference_in_steps for e in exps], dtype=next_states.dtype, device=model.device)
-    gammas = torch.pow(tensor(gamma, dtype=next_states.dtype, device=model.device), lengths).detach()
-    rewards = tensor([e.reward for e in exps], dtype=next_states.dtype, device=model.device)
-    target_action_values = (next_state_values * gammas) + rewards
-    return target_action_values.unsqueeze(1)
+  lengths = tensor([e.state_difference_in_steps for e in exps], dtype=next_states.dtype, device=model.device)
+  gammas = torch.pow(tensor(gamma, dtype=next_states.dtype, device=model.device), lengths).detach()
+  rewards = tensor([e.reward for e in exps], dtype=next_states.dtype, device=model.device)
+  target_action_values = (next_state_values * gammas) + rewards
+  return target_action_values.unsqueeze(1)
 
 
-def calculate_losses(model: LearningModel, timings: Timings, gamma: float, exps: [Experience]) -> Tensor:
+def calculate_losses(model: LearningModel, gamma: float, exps: [Experience]) -> Tensor:
   """
   :param model: the model
   :param timings: to record time taken
   :param gamma: discounting factor for future (next-step) rewards (e.g. 0.99)
   :param exps: Experiences calculate losses for
   """
-  with timings['    get target action value']:
-    target_action_values = get_target_action_values(model, model.status.timings, gamma, exps).detach()
+  target_action_values = get_target_action_values(model, gamma, exps).detach()
 
-  with timings['    predicted action values']:
-    with timings['      transfer states']:
-      states = _state_from_experiences(exps, True, dtype=target_action_values.dtype, device=model.device)
-      actions = torch.stack([tensor([e.action.index]) for e in exps]). \
-        to(model.device, non_blocking=True)
-    with timings['      run network']:
-      predicted_action_values = model.policy_net(states).gather(1, actions)
+  states = _state_from_experiences(exps, True, dtype=target_action_values.dtype, device=model.device)
+  actions = torch.stack([tensor([e.action.index]) for e in exps]). \
+    to(model.device, non_blocking=True)
+  predicted_action_values = model.policy_net(states).gather(1, actions)
 
   return F.mse_loss(predicted_action_values, target_action_values, reduction='none')
 
@@ -73,7 +66,7 @@ def learn_from_memory(model: LearningModel, batch_size: int, gamma: float, beta:
     weights = tensor([s.weight(beta) for s in sample], device=model.device)
 
   with model.status.timings['  forward loss']:
-    losses = calculate_losses(model, model.status.timings, gamma, exps)
+    losses = calculate_losses(model, gamma, exps)
     loss = torch.mean(losses * weights.type(losses.dtype))
 
   with model.status.timings['  backprop loss']:
