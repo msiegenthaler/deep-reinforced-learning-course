@@ -4,7 +4,6 @@ from torch import Tensor, tensor
 
 from drl.deepq.game import Experience
 from drl.deepq.model import LearningModel
-from drl.utils.timings import Timings
 
 
 def _state_from_experiences(exps: [Experience], before: bool, dtype: torch.dtype, device: torch.device):

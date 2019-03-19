@@ -21,7 +21,7 @@ class State():
   def as_tensor(self, dtype: torch.dtype = torch.float, device: Optional[torch.device] = None) -> torch.Tensor:
     """Combined tensor of the complete state"""
     if self._on_device is not None:
-      return self._on_device
+      return self._on_device.to(dtype=dtype)
     else:
       if dtype == torch.half:
         # cat/stack on cpu not supported, so move to device fist
