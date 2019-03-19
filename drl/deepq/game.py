@@ -23,9 +23,9 @@ class State():
     if self._on_device is not None:
       return self._on_device.to(dtype=dtype)
     else:
-      if dtype == torch.half:
+      if self._frames[0].dtype == torch.half:
         # cat/stack on cpu not supported, so move to device fist
-        frames = [f.to(device, non_blocking=True) for f in self.frames]
+        frames = [f.to(device, non_blocking=True) for f in self._frames]
       else:
         frames = self._frames
       tensor = torch.stack(tuple(frames))
