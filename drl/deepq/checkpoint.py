@@ -37,7 +37,7 @@ def load_checkpoint(model: LearningModel, suffix: str = 'last') -> bool:
     assert (model.game_name == data['game_name'])
     if model.strategy_name != data['strategy_name']:
       print('Warning, loading checkpoint from strategy %s' % data['strategy_name'])
-    model.status._training_log = data['status_training_epochs'] if 'status_training_epochs' in data else []
+    model.status._training_epochs = data['status_training_epochs'] if 'status_training_epochs' in data else []
     model.status._training_episodes = data['status_training_episodes'] if 'status_training_episodes' in data else []
     model.status._validation_episodes = data['status_validation_episodes'] if 'status_validation_episodes' in data else []
     model.status.timings = data['timings'] if 'timings' in data else Timings()
