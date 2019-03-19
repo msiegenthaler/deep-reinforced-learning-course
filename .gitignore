@@ -3,3 +3,6 @@
 _vizdoom.ini
 .idea
 __pycache__
+.floydexpt
+.floydignore
+floyd.yml
