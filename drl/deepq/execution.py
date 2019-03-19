@@ -108,7 +108,7 @@ def run_episode(model: ExecutionModel, game: Game) -> (float, int, Dict[str, int
   :return: (total reward, number of steps taken, action map)
   """
   model.policy_net.eval()
-  state = game.reset().as_tensor()
+  state = game.reset().as_tensor(device=model.device)
   total_reward = 0
   steps = 0
   actions = {}
@@ -122,7 +122,7 @@ def run_episode(model: ExecutionModel, game: Game) -> (float, int, Dict[str, int
     exp = game.step(action)
     steps += 1
     total_reward += exp.reward
-    state = exp.state_after.as_tensor()
+    state = exp.state_after.as_tensor(device=model.device)
 
     if exp.done:
       break
